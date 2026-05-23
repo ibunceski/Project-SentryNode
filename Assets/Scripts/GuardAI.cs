@@ -60,12 +60,6 @@ public class GuardAI : MonoBehaviour
     [SerializeField]
     private float destinationEpsilon = 0.15f;
 
-    [SerializeField]
-    private float searchCircleRadius = 2f;
-
-    [SerializeField]
-    private float searchCircleAngularSpeed = 120f;
-
     [Header("Runtime Debug")]
     [SerializeField]
     private string lastActiveLeafNodeName = "None";
@@ -74,23 +68,12 @@ public class GuardAI : MonoBehaviour
     private GuardState currentGuardState = GuardState.Patrolling;
 
     private Node root;
-    private Sequence investigateSequenceNode;
     private Vector3 lastKnownPosition;
     private bool hasLastKnownPosition;
-    private float searchTimer;
-    private bool searchTimerActive;
-    private Vector3 searchCenterPosition;
-    private float searchAngleDegrees;
-    private float suspiciousTimer;
-    private bool suspiciousTimerActive;
-    private float suspiciousCooldownUntil;
+    private Vector3 noiseSourcePosition;
+    private bool hasNoiseSource;
+    private float searchEndTime = -1f;
     private float defaultAgentSpeed = 3.5f;
-    private string lastLoggedActiveNodeName = "None";
-    private bool hasLoggedMissingHearingSystem;
-    private float nextNavMeshRecoveryTime;
-    private bool hasLoggedNavMeshIssue;
-    private NodeState previousInvestigateSequenceState = NodeState.Failure;
-    private float patrolNoPathTimer;
 
     /// <summary>
     /// Gets the last leaf node name evaluated by the behavior tree.
@@ -112,43 +95,12 @@ public class GuardAI : MonoBehaviour
     /// </summary>
     private void Start()
     {
-        GuardAlertSystem.Reset();
-
-        if (navMeshAgent == null)
-        {
-            navMeshAgent = GetComponent<NavMeshAgent>();
-        }
-
-        if (visionSystem == null)
-        {
-            visionSystem = GetComponent<VisionSystem>();
-        }
-
-        if (hearingSystem == null)
-        {
-            hearingSystem = GetComponent<HearingSystem>();
-        }
-
-        if (patrolSystem == null)
-        {
-            patrolSystem = GetComponent<PatrolSystem>();
-        }
-
-        TryRecoverAgentOnNavMesh();
-
         if (navMeshAgent != null)
         {
             defaultAgentSpeed = navMeshAgent.speed;
         }
 
         root = BuildTree();
-        patrolSystem?.ResetPatrol();
-        patrolSystem?.NotifyMovementReset();
-        if (navMeshAgent != null && patrolSystem != null)
-        {
-            navMeshAgent.isStopped = false;
-            patrolSystem.ForceStartPatrol(navMeshAgent);
-        }
     }
 
     /// <summary>
@@ -163,31 +115,7 @@ public class GuardAI : MonoBehaviour
             return;
         }
 
-        if (Time.time >= nextNavMeshRecoveryTime)
-        {
-            nextNavMeshRecoveryTime = Time.time + 1f;
-            TryRecoverAgentOnNavMesh();
-
-            if (currentGuardState == GuardState.Patrolling
-                && patrolSystem != null
-                && navMeshAgent != null
-                && navMeshAgent.enabled
-                && navMeshAgent.isOnNavMesh
-                && !navMeshAgent.pathPending
-                && !navMeshAgent.hasPath)
-            {
-                patrolSystem.ForceStartPatrol(navMeshAgent);
-            }
-        }
-
         root.Evaluate();
-        HandleInvestigateSequenceCompletion();
-
-        if (!string.Equals(lastLoggedActiveNodeName, ActiveNodeName, StringComparison.Ordinal))
-        {
-            Debug.Log($"[GuardAI] Transition: {lastLoggedActiveNodeName} -> {ActiveNodeName}");
-            lastLoggedActiveNodeName = ActiveNodeName;
-        }
     }
 
     private Node BuildTree()
@@ -202,22 +130,22 @@ public class GuardAI : MonoBehaviour
         suspiciousSequence.AddChild(new LambdaConditionNode("IsSuspicious", EvaluateIsSuspicious));
         suspiciousSequence.AddChild(new LambdaActionNode("TurnTowardSuspicion", EvaluateTurnTowardSuspicion));
 
+        Sequence investigateSequence = new Sequence("Investigate Sequence");
+        investigateSequence.AddChild(new LambdaConditionNode("HasLastKnownPosition", EvaluateHasLastKnownPosition));
+        investigateSequence.AddChild(new LambdaActionNode("MoveToLastKnownPosition", EvaluateMoveToLastKnownPosition));
+        investigateSequence.AddChild(new LambdaActionNode("SearchArea", EvaluateSearchArea));
+
         Sequence noiseSequence = new Sequence("Noise Sequence");
         noiseSequence.AddChild(new LambdaConditionNode("HeardNoise", EvaluateHeardNoise));
-        noiseSequence.AddChild(new LambdaActionNode("MoveToNoisePosition", EvaluateMoveToNoisePosition));
+        noiseSequence.AddChild(new LambdaActionNode("MoveToNoiseSource", EvaluateMoveToNoiseSource));
         noiseSequence.AddChild(new LambdaActionNode("ClearNoise", EvaluateClearNoise));
-
-        investigateSequenceNode = new Sequence("Investigate Sequence");
-        investigateSequenceNode.AddChild(new LambdaConditionNode("HasLastKnownPosition", EvaluateHasLastKnownPosition));
-        investigateSequenceNode.AddChild(new LambdaActionNode("MoveToLastKnownPosition", EvaluateMoveToLastKnownPosition));
-        investigateSequenceNode.AddChild(new LambdaActionNode("SearchArea", EvaluateSearchArea));
 
         LambdaActionNode patrolNode = new LambdaActionNode("Patrol", EvaluatePatrol);
 
         rootSelector.AddChild(chaseSequence);
-        rootSelector.AddChild(noiseSequence);
         rootSelector.AddChild(suspiciousSequence);
-        rootSelector.AddChild(investigateSequenceNode);
+        rootSelector.AddChild(investigateSequence);
+        rootSelector.AddChild(noiseSequence);
         rootSelector.AddChild(patrolNode);
 
         return rootSelector;
@@ -262,11 +190,6 @@ public class GuardAI : MonoBehaviour
             return NodeState.Failure;
         }
 
-        if (Time.time < suspiciousCooldownUntil)
-        {
-            return NodeState.Failure;
-        }
-
         if (visionSystem.CurrentSuspicionLevel != VisionSystem.SuspicionLevel.Suspicious)
         {
             return NodeState.Failure;
@@ -279,7 +202,7 @@ public class GuardAI : MonoBehaviour
     {
         MarkLeafActive("TurnTowardSuspicion");
         currentGuardState = GuardState.Suspicious;
-        ResetSearchTimer();
+        searchEndTime = -1f;
         SetAgentSpeedMultiplier(0.6f);
         if (navMeshAgent != null && navMeshAgent.enabled && navMeshAgent.isOnNavMesh)
         {
@@ -288,20 +211,6 @@ public class GuardAI : MonoBehaviour
 
         if (!TryGetSuspicionFocusPosition(out Vector3 focusPosition))
         {
-            return NodeState.Failure;
-        }
-
-        if (!suspiciousTimerActive)
-        {
-            suspiciousTimerActive = true;
-            suspiciousTimer = 0f;
-        }
-
-        suspiciousTimer += Time.deltaTime;
-        if (suspiciousTimer >= 5f)
-        {
-            suspiciousTimerActive = false;
-            suspiciousCooldownUntil = Time.time + 2f;
             return NodeState.Failure;
         }
 
@@ -315,7 +224,6 @@ public class GuardAI : MonoBehaviour
         float turnSpeed = navMeshAgent != null ? navMeshAgent.angularSpeed : 360f;
         Quaternion targetRotation = Quaternion.LookRotation(toFocus.normalized, Vector3.up);
         transform.rotation = Quaternion.RotateTowards(transform.rotation, targetRotation, turnSpeed * Time.deltaTime);
-
         return NodeState.Running;
     }
 
@@ -323,8 +231,7 @@ public class GuardAI : MonoBehaviour
     {
         MarkLeafActive("ChasePlayer");
         currentGuardState = GuardState.Chasing;
-        ResetSearchTimer();
-        suspiciousTimerActive = false;
+        searchEndTime = -1f;
         SetAgentSpeedMultiplier(1f);
 
         if (!TryGetPlayerPosition(out Vector3 playerPosition))
@@ -366,7 +273,6 @@ public class GuardAI : MonoBehaviour
     {
         MarkLeafActive("MoveToLastKnownPosition");
         currentGuardState = GuardState.Investigating;
-        suspiciousTimerActive = false;
         SetAgentSpeedMultiplier(1f);
 
         if (!hasLastKnownPosition)
@@ -388,24 +294,11 @@ public class GuardAI : MonoBehaviour
             return NodeState.Failure;
         }
 
-        if (navMeshAgent == null || !navMeshAgent.enabled || !navMeshAgent.isOnNavMesh)
-        {
-            return NodeState.Failure;
-        }
+        SetDestination(lastKnownPosition);
 
-        if (!navMeshAgent.hasPath || Vector3.Distance(navMeshAgent.destination, lastKnownPosition) > 0.1f)
+        if (HasReachedDestination())
         {
-            navMeshAgent.isStopped = false;
-            navMeshAgent.SetDestination(lastKnownPosition);
-        }
-
-        if (!navMeshAgent.pathPending && navMeshAgent.pathStatus == NavMeshPathStatus.PathInvalid)
-        {
-            return NodeState.Failure;
-        }
-
-        if (!navMeshAgent.pathPending && navMeshAgent.remainingDistance < navMeshAgent.stoppingDistance + 0.2f)
-        {
+            searchEndTime = -1f;
             return NodeState.Success;
         }
 
@@ -416,27 +309,21 @@ public class GuardAI : MonoBehaviour
     {
         MarkLeafActive("SearchArea");
         currentGuardState = GuardState.Searching;
-        suspiciousTimerActive = false;
         SetAgentSpeedMultiplier(1f);
 
-        if (!searchTimerActive)
+        if (searchEndTime < 0f)
         {
-            searchTimerActive = true;
-            searchTimer = 0f;
-            searchCenterPosition = hasLastKnownPosition ? lastKnownPosition : transform.position;
-            searchAngleDegrees = 0f;
+            searchEndTime = Time.time + Mathf.Max(0.1f, searchDurationSeconds);
         }
 
-        searchTimer += Time.deltaTime;
-        UpdateSearchCircleMovement();
-        float requiredSearchDuration = Mathf.Max(0.1f, searchDurationSeconds);
-        if (searchTimer < requiredSearchDuration)
+        if (Time.time < searchEndTime)
         {
             return NodeState.Running;
         }
 
-        ResetInvestigationMemory();
-        ResetSearchTimer();
+        searchEndTime = -1f;
+        hasLastKnownPosition = false;
+        visionSystem?.ClearLastKnownPosition();
         return NodeState.Success;
     }
 
@@ -444,56 +331,52 @@ public class GuardAI : MonoBehaviour
     {
         MarkLeafActive("HeardNoise");
 
-        if (hearingSystem == null)
-        {
-            if (!hasLoggedMissingHearingSystem)
-            {
-                Debug.LogError("[GuardAI] HearingSystem reference is null. Assign HearingSystem on the same guard GameObject.");
-                hasLoggedMissingHearingSystem = true;
-            }
+        bool heardNoise = ReadBoolMember(
+            hearingSystem,
+            "HeardNoise",
+            "HasHeardNoise",
+            "HasPendingNoise");
 
-            return NodeState.Failure;
-        }
-
-        hasLoggedMissingHearingSystem = false;
-        if (!hearingSystem.HeardNoise)
+        if (!heardNoise)
         {
             return NodeState.Failure;
         }
 
-        GuardAlertSystem.ReportSuspicious(hearingSystem.NoisePosition);
-        return NodeState.Success;
+        if (TryGetVector3Member(
+            hearingSystem,
+            out Vector3 sensedNoisePosition,
+            "NoiseSourcePosition",
+            "LastHeardPosition",
+            "LastNoisePosition"))
+        {
+            noiseSourcePosition = sensedNoisePosition;
+            hasNoiseSource = true;
+        }
+        else if (TryGetPlayerPosition(out Vector3 playerPosition))
+        {
+            noiseSourcePosition = playerPosition;
+            hasNoiseSource = true;
+        }
+
+        return hasNoiseSource ? NodeState.Success : NodeState.Failure;
     }
 
-    private NodeState EvaluateMoveToNoisePosition()
+    private NodeState EvaluateMoveToNoiseSource()
     {
-        MarkLeafActive("MoveToNoisePosition");
+        MarkLeafActive("MoveToNoiseSource");
         currentGuardState = GuardState.Investigating;
-        suspiciousTimerActive = false;
         SetAgentSpeedMultiplier(1f);
 
-        if (hearingSystem == null)
-        {
-            if (!hasLoggedMissingHearingSystem)
-            {
-                Debug.LogError("[GuardAI] HearingSystem reference is null. Assign HearingSystem on the same guard GameObject.");
-                hasLoggedMissingHearingSystem = true;
-            }
-
-            return NodeState.Failure;
-        }
-
-        if (!hearingSystem.HeardNoise)
+        if (!hasNoiseSource)
         {
             return NodeState.Failure;
         }
 
-        Vector3 noisePosition = hearingSystem.NoisePosition;
-        SetDestination(noisePosition);
+        SetDestination(noiseSourcePosition);
 
         if (HasReachedDestination())
         {
-            lastKnownPosition = noisePosition;
+            lastKnownPosition = noiseSourcePosition;
             hasLastKnownPosition = true;
             return NodeState.Success;
         }
@@ -505,65 +388,28 @@ public class GuardAI : MonoBehaviour
     {
         MarkLeafActive("ClearNoise");
 
-        if (hearingSystem == null)
-        {
-            if (!hasLoggedMissingHearingSystem)
-            {
-                Debug.LogError("[GuardAI] HearingSystem reference is null. Assign HearingSystem on the same guard GameObject.");
-                hasLoggedMissingHearingSystem = true;
-            }
-
-            return NodeState.Failure;
-        }
-
-        hearingSystem.ClearNoise();
+        InvokeFirstMethod(hearingSystem, "ClearNoise", "ResetNoise", "ConsumeNoise");
+        hasNoiseSource = false;
         return NodeState.Success;
     }
 
     private NodeState EvaluatePatrol()
     {
         MarkLeafActive("Patrol");
-        if (currentGuardState != GuardState.Patrolling && patrolSystem != null)
-        {
-            patrolSystem.ResetPatrol();
-        }
-
         if (currentGuardState == GuardState.Chasing
             || currentGuardState == GuardState.Suspicious
             || currentGuardState == GuardState.Investigating
             || currentGuardState == GuardState.Searching)
         {
-            if (navMeshAgent != null && navMeshAgent.enabled && navMeshAgent.isOnNavMesh && !navMeshAgent.hasPath)
-            {
-                patrolSystem?.NotifyMovementReset();
-            }
+            patrolSystem?.ResetPatrol();
         }
 
         currentGuardState = GuardState.Patrolling;
-        ResetSearchTimer();
-        suspiciousTimerActive = false;
+        searchEndTime = -1f;
         SetAgentSpeedMultiplier(1f);
 
         if (patrolSystem != null)
         {
-            if (navMeshAgent != null && navMeshAgent.enabled && navMeshAgent.isOnNavMesh)
-            {
-                bool missingPath = !navMeshAgent.pathPending && !navMeshAgent.hasPath;
-                if (missingPath)
-                {
-                    patrolNoPathTimer += Time.deltaTime;
-                    if (patrolNoPathTimer >= 0.25f)
-                    {
-                        patrolSystem.ForceStartPatrol(navMeshAgent);
-                        patrolNoPathTimer = 0f;
-                    }
-                }
-                else
-                {
-                    patrolNoPathTimer = 0f;
-                }
-            }
-
             return patrolSystem.Patrol(navMeshAgent);
         }
 
@@ -589,72 +435,6 @@ public class GuardAI : MonoBehaviour
 
         navMeshAgent.isStopped = false;
         navMeshAgent.SetDestination(destination);
-    }
-
-    private void HandleInvestigateSequenceCompletion()
-    {
-        if (investigateSequenceNode == null)
-        {
-            return;
-        }
-
-        NodeState currentState = investigateSequenceNode.CurrentState;
-        if (previousInvestigateSequenceState == NodeState.Running
-            && (currentState == NodeState.Success || currentState == NodeState.Failure))
-        {
-            ResetInvestigationMemory();
-            ResetSearchTimer();
-
-            if (navMeshAgent != null && navMeshAgent.enabled && navMeshAgent.isOnNavMesh)
-            {
-                navMeshAgent.ResetPath();
-            }
-        }
-
-        previousInvestigateSequenceState = currentState;
-    }
-
-    private void ResetInvestigationMemory()
-    {
-        hasLastKnownPosition = false;
-        visionSystem?.ClearLastKnownPosition();
-    }
-
-    private void ResetSearchTimer()
-    {
-        searchTimer = 0f;
-        searchTimerActive = false;
-        searchCenterPosition = Vector3.zero;
-        searchAngleDegrees = 0f;
-    }
-
-    private void UpdateSearchCircleMovement()
-    {
-        if (navMeshAgent == null || !navMeshAgent.enabled || !navMeshAgent.isOnNavMesh)
-        {
-            return;
-        }
-
-        float radius = Mathf.Max(0.5f, searchCircleRadius);
-        searchAngleDegrees = (searchAngleDegrees + Mathf.Max(1f, searchCircleAngularSpeed) * Time.deltaTime) % 360f;
-
-        Vector3 radial = Quaternion.Euler(0f, searchAngleDegrees, 0f) * Vector3.forward;
-        Vector3 desiredPoint = searchCenterPosition + radial * radius;
-
-        bool shouldSetDestination =
-            !navMeshAgent.hasPath
-            || (!navMeshAgent.pathPending && navMeshAgent.remainingDistance <= navMeshAgent.stoppingDistance + 0.15f);
-
-        if (!shouldSetDestination)
-        {
-            return;
-        }
-
-        if (NavMesh.SamplePosition(desiredPoint, out NavMeshHit sampledHit, 1.5f, NavMesh.AllAreas))
-        {
-            navMeshAgent.isStopped = false;
-            navMeshAgent.SetDestination(sampledHit.position);
-        }
     }
 
     private bool HasReachedDestination()
@@ -750,31 +530,32 @@ public class GuardAI : MonoBehaviour
         navMeshAgent.speed = defaultAgentSpeed * Mathf.Max(0f, multiplier) * globalMultiplier;
     }
 
-    private void TryRecoverAgentOnNavMesh()
+    private static bool ReadBoolMember(object instance, params string[] memberNames)
     {
-        if (navMeshAgent == null || !navMeshAgent.enabled)
+        if (instance == null)
         {
-            return;
+            return false;
         }
 
-        if (navMeshAgent.isOnNavMesh)
+        Type type = instance.GetType();
+        BindingFlags flags = BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase;
+
+        for (int i = 0; i < memberNames.Length; i++)
         {
-            hasLoggedNavMeshIssue = false;
-            return;
+            PropertyInfo property = type.GetProperty(memberNames[i], flags);
+            if (property != null && property.PropertyType == typeof(bool) && property.GetIndexParameters().Length == 0)
+            {
+                return (bool)property.GetValue(instance);
+            }
+
+            MethodInfo method = type.GetMethod(memberNames[i], flags, null, Type.EmptyTypes, null);
+            if (method != null && method.ReturnType == typeof(bool))
+            {
+                return (bool)method.Invoke(instance, null);
+            }
         }
 
-        if (NavMesh.SamplePosition(transform.position, out NavMeshHit hit, 20f, NavMesh.AllAreas))
-        {
-            navMeshAgent.Warp(hit.position);
-            hasLoggedNavMeshIssue = false;
-            return;
-        }
-
-        if (!hasLoggedNavMeshIssue)
-        {
-            Debug.LogWarning($"[GuardAI] {name} is not on NavMesh and could not recover within 20 units.");
-            hasLoggedNavMeshIssue = true;
-        }
+        return false;
     }
 
     private static bool TryGetVector3Member(object instance, out Vector3 value, params string[] memberNames)
@@ -843,6 +624,29 @@ public class GuardAI : MonoBehaviour
         }
 
         return false;
+    }
+
+    private static void InvokeFirstMethod(object instance, params string[] methodNames)
+    {
+        if (instance == null)
+        {
+            return;
+        }
+
+        Type type = instance.GetType();
+        BindingFlags flags = BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase;
+
+        for (int i = 0; i < methodNames.Length; i++)
+        {
+            MethodInfo method = type.GetMethod(methodNames[i], flags, null, Type.EmptyTypes, null);
+            if (method == null)
+            {
+                continue;
+            }
+
+            method.Invoke(instance, null);
+            return;
+        }
     }
 
     /// <summary>
