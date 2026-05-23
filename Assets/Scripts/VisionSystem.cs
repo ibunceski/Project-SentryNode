@@ -38,9 +38,11 @@ public class VisionSystem : MonoBehaviour
     [SerializeField]
     private LayerMask playerMask;
 
-    private const int MaxPlayerColliders = 16;
-    private const float EyeHeight = 1.6f;
-    private readonly Collider[] playerOverlapResults = new Collider[MaxPlayerColliders];
+    [SerializeField]
+    private Vector3 eyeOffset = new Vector3(0f, 1.6f, 0f);
+
+    [SerializeField]
+    private Transform playerTarget;
 
     private float suspicion;
     private SuspicionLevel suspicionLevel;
@@ -93,6 +95,7 @@ public class VisionSystem : MonoBehaviour
 
     private void Update()
     {
+        EnsurePlayerTarget();
         PerceptionResult perception = EvaluatePerception();
         hasRaycastTargetPosition = perception.HasRaycastTarget;
         lastRaycastTargetPosition = perception.RaycastTargetPosition;
@@ -117,6 +120,14 @@ public class VisionSystem : MonoBehaviour
             LastKnownPosition = suspicionFocusPosition;
             HasLastKnownPosition = true;
         }
+
+        if (perception.HasDirection)
+        {
+            Debug.DrawRay(
+                perception.EyePosition,
+                perception.DirectionToPlayer * viewDistance,
+                CanSeePlayer() ? Color.red : Color.green);
+        }
     }
 
     /// <summary>
@@ -138,116 +149,123 @@ public class VisionSystem : MonoBehaviour
 
     private PerceptionResult EvaluatePerception()
     {
-        Vector3 eyePosition = GetEyePosition();
-        float halfFov = fieldOfViewAngle * 0.5f;
-        float viewDistanceSqr = viewDistance * viewDistance;
-        float bestVisibleDistanceSqr = float.MaxValue;
-        float bestBlockedDistanceSqr = float.MaxValue;
-        Transform bestVisibleTransform = null;
-        Vector3 bestVisiblePosition = Vector3.zero;
-        Vector3 bestBlockedPosition = Vector3.zero;
-        bool hasBlockedInFov = false;
-
-        int hitCount = Physics.OverlapSphereNonAlloc(
-            transform.position,
-            viewDistance,
-            playerOverlapResults,
-            playerMask,
-            QueryTriggerInteraction.Ignore);
-
-        if (hitCount <= 0)
+        if (playerTarget == null)
         {
             return new PerceptionResult(-20f);
         }
 
+        Vector3 eyePos = GetEyePosition();
+        Vector3 playerCenter = playerTarget.position + Vector3.up * 0.9f;
+        Vector3 toPlayer = playerCenter - eyePos;
+        float distanceToPlayer = toPlayer.magnitude;
+
+        if (distanceToPlayer <= 0.0001f)
+        {
+            return new PerceptionResult(-20f);
+        }
+
+        Vector3 direction = toPlayer.normalized;
+        float angle = Vector3.Angle(transform.forward, direction);
+        bool inFov = angle < fieldOfViewAngle * 0.5f;
+        bool inRange = distanceToPlayer <= viewDistance;
+        bool inFovAndRange = inFov && inRange;
+
+        int obstacleOnlyMask = obstacleMask.value & ~playerMask.value;
+        bool hasObstacleBetween = false;
+        Vector3 rayEnd = playerCenter;
+
+        if (inFovAndRange)
+        {
+            bool hitObstacle = Physics.Raycast(
+                eyePos,
+                direction,
+                out RaycastHit hit,
+                viewDistance,
+                obstacleOnlyMask,
+                QueryTriggerInteraction.Ignore);
+
+            if (hitObstacle)
+            {
+                rayEnd = hit.point;
+                hasObstacleBetween = hit.distance <= distanceToPlayer;
+            }
+        }
+
+        bool clearLineOfSight = inFovAndRange && (!hasObstacleBetween);
+        float suspicionRate;
+
+        if (clearLineOfSight && distanceToPlayer < 5f)
+        {
+            suspicionRate = 60f;
+        }
+        else if (clearLineOfSight && distanceToPlayer <= 10f)
+        {
+            suspicionRate = 30f;
+        }
+        else if (inFovAndRange && hasObstacleBetween)
+        {
+            suspicionRate = 5f;
+        }
+        else
+        {
+            suspicionRate = -20f;
+        }
+
+        return new PerceptionResult(suspicionRate)
+        {
+            HasClearLineOfSight = clearLineOfSight,
+            VisiblePlayerTransform = clearLineOfSight ? playerTarget : null,
+            HasSuspicionFocus = inFovAndRange,
+            SuspicionFocusPosition = playerTarget.position,
+            HasRaycastTarget = true,
+            RaycastTargetPosition = rayEnd,
+            EyePosition = eyePos,
+            DirectionToPlayer = direction,
+            HasDirection = true
+        };
+    }
+
+    private Vector3 GetEyePosition()
+    {
+        return transform.position + eyeOffset;
+    }
+
+    private void EnsurePlayerTarget()
+    {
+        if (playerTarget != null)
+        {
+            return;
+        }
+
+        GameObject playerByTag = GameObject.FindWithTag("Player");
+        if (playerByTag != null)
+        {
+            playerTarget = playerByTag.transform;
+            return;
+        }
+
+        int hitCount = Physics.OverlapSphereNonAlloc(
+            transform.position,
+            viewDistance * 2f,
+            overlapResults,
+            playerMask,
+            QueryTriggerInteraction.Ignore);
+        if (hitCount <= 0)
+        {
+            return;
+        }
+
         for (int i = 0; i < hitCount; i++)
         {
-            Collider collider = playerOverlapResults[i];
+            Collider collider = overlapResults[i];
             if (collider == null)
             {
                 continue;
             }
 
-            Transform target = collider.transform;
-            Vector3 targetPosition = target.position;
-            Vector3 toTarget = targetPosition - eyePosition;
-            float distanceSqr = toTarget.sqrMagnitude;
-
-            if (distanceSqr <= 0.0001f || distanceSqr > viewDistanceSqr)
-            {
-                continue;
-            }
-
-            Vector3 directionToTarget = toTarget.normalized;
-            float angle = Vector3.Angle(transform.forward, directionToTarget);
-            if (angle > halfFov)
-            {
-                continue;
-            }
-
-            float distance = Mathf.Sqrt(distanceSqr);
-            bool blocked = Physics.Raycast(
-                eyePosition,
-                directionToTarget,
-                distance,
-                obstacleMask,
-                QueryTriggerInteraction.Ignore);
-
-            if (blocked)
-            {
-                hasBlockedInFov = true;
-                if (distanceSqr < bestBlockedDistanceSqr)
-                {
-                    bestBlockedDistanceSqr = distanceSqr;
-                    bestBlockedPosition = targetPosition;
-                }
-
-                continue;
-            }
-
-            if (distanceSqr < bestVisibleDistanceSqr)
-            {
-                bestVisibleDistanceSqr = distanceSqr;
-                bestVisibleTransform = target;
-                bestVisiblePosition = targetPosition;
-            }
+            playerTarget = collider.transform;
+            return;
         }
-
-        if (bestVisibleTransform != null)
-        {
-            float visibleDistance = Mathf.Sqrt(bestVisibleDistanceSqr);
-            float gain = visibleDistance < 5f ? 60f : (visibleDistance <= 10f ? 30f : -20f);
-
-            return new PerceptionResult(gain)
-            {
-                HasClearLineOfSight = true,
-                VisiblePlayerTransform = bestVisibleTransform,
-                HasSuspicionFocus = true,
-                SuspicionFocusPosition = bestVisiblePosition,
-                HasRaycastTarget = true,
-                RaycastTargetPosition = bestVisiblePosition
-            };
-        }
-
-        if (hasBlockedInFov)
-        {
-            return new PerceptionResult(5f)
-            {
-                HasClearLineOfSight = false,
-                VisiblePlayerTransform = null,
-                HasSuspicionFocus = true,
-                SuspicionFocusPosition = bestBlockedPosition,
-                HasRaycastTarget = true,
-                RaycastTargetPosition = bestBlockedPosition
-            };
-        }
-
-        return new PerceptionResult(-20f);
-    }
-
-    private Vector3 GetEyePosition()
-    {
-        return transform.position + Vector3.up * EyeHeight;
     }
 
     private void OnDrawGizmos()
@@ -307,6 +325,9 @@ public class VisionSystem : MonoBehaviour
             SuspicionFocusPosition = Vector3.zero;
             HasRaycastTarget = false;
             RaycastTargetPosition = Vector3.zero;
+            EyePosition = Vector3.zero;
+            DirectionToPlayer = Vector3.zero;
+            HasDirection = false;
         }
 
         public float SuspicionRatePerSecond { get; set; }
@@ -316,5 +337,11 @@ public class VisionSystem : MonoBehaviour
         public Vector3 SuspicionFocusPosition { get; set; }
         public bool HasRaycastTarget { get; set; }
         public Vector3 RaycastTargetPosition { get; set; }
+        public Vector3 EyePosition { get; set; }
+        public Vector3 DirectionToPlayer { get; set; }
+        public bool HasDirection { get; set; }
     }
+
+    private const int MaxPlayerColliders = 16;
+    private readonly Collider[] overlapResults = new Collider[MaxPlayerColliders];
 }

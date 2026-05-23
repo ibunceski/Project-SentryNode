@@ -1,4 +1,4 @@
-using System;
+using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
@@ -27,21 +27,7 @@ public class HearingSystem : MonoBehaviour
         Interaction
     }
 
-    private readonly struct NoiseEvent
-    {
-        public NoiseEvent(Vector3 position, float radius, NoiseType type)
-        {
-            Position = position;
-            Radius = radius;
-            Type = type;
-        }
-
-        public Vector3 Position { get; }
-        public float Radius { get; }
-        public NoiseType Type { get; }
-    }
-
-    private static event Action<NoiseEvent> NoiseReported;
+    private static readonly List<HearingSystem> allSystems = new List<HearingSystem>();
 
     [SerializeField]
     private float noiseDuration = 5f;
@@ -93,7 +79,35 @@ public class HearingSystem : MonoBehaviour
             return;
         }
 
-        NoiseReported?.Invoke(new NoiseEvent(position, radius, type));
+        Debug.Log($"[Hearing] Noise reported at {position}, radius {radius}");
+
+        float sqrRadius = radius * radius;
+        for (int i = allSystems.Count - 1; i >= 0; i--)
+        {
+            HearingSystem system = allSystems[i];
+            if (system == null)
+            {
+                allSystems.RemoveAt(i);
+                continue;
+            }
+
+            if (!system.isActiveAndEnabled)
+            {
+                continue;
+            }
+
+            float sqrDistance = (system.transform.position - position).sqrMagnitude;
+            if (sqrDistance > sqrRadius)
+            {
+                continue;
+            }
+
+            system.heardNoise = true;
+            system.noisePosition = position;
+            system.noiseRadius = radius;
+            system.lastNoiseType = type;
+            system.noiseTimer = Mathf.Max(0.01f, system.noiseDuration);
+        }
     }
 
     /// <summary>
@@ -105,14 +119,17 @@ public class HearingSystem : MonoBehaviour
         noiseTimer = 0f;
     }
 
-    private void OnEnable()
+    private void Awake()
     {
-        NoiseReported += OnNoiseReported;
+        if (!allSystems.Contains(this))
+        {
+            allSystems.Add(this);
+        }
     }
 
-    private void OnDisable()
+    private void OnDestroy()
     {
-        NoiseReported -= OnNoiseReported;
+        allSystems.Remove(this);
     }
 
     private void Update()
@@ -139,21 +156,5 @@ public class HearingSystem : MonoBehaviour
 
         Gizmos.color = Color.yellow;
         Gizmos.DrawWireSphere(noisePosition, noiseRadius);
-    }
-
-    private void OnNoiseReported(NoiseEvent noiseEvent)
-    {
-        float sqrDistance = (transform.position - noiseEvent.Position).sqrMagnitude;
-        float sqrRadius = noiseEvent.Radius * noiseEvent.Radius;
-        if (sqrDistance > sqrRadius)
-        {
-            return;
-        }
-
-        heardNoise = true;
-        noisePosition = noiseEvent.Position;
-        noiseRadius = noiseEvent.Radius;
-        lastNoiseType = noiseEvent.Type;
-        noiseTimer = Mathf.Max(0.01f, noiseDuration);
     }
 }

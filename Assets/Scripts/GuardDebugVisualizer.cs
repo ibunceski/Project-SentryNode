@@ -20,9 +20,17 @@ public class GuardDebugVisualizer : MonoBehaviour
     private GUIStyle regularStyle;
     private GUIStyle alertStyle;
     private GUIStyle barTextStyle;
+    private GUIStyle hudStyle;
+    private Renderer[] cachedRenderers;
 
     private void Awake()
     {
+        guardAI = GetComponent<GuardAI>();
+        if (guardAI == null)
+        {
+            Debug.LogError("[GuardDebugVisualizer] Missing GuardAI component on guard GameObject.");
+        }
+
         CacheReferences();
     }
 
@@ -33,46 +41,91 @@ public class GuardDebugVisualizer : MonoBehaviour
 
     private void OnGUI()
     {
-        if (!showDebug)
+        if (!showDebug || guardAI == null)
         {
             return;
         }
 
-        if (guardAI == null)
+        Camera hudCamera = ResolveHudCamera();
+        if (hudCamera == null)
         {
-            CacheReferences();
-            if (guardAI == null)
+            return;
+        }
+
+        Vector3 worldPos = GetLabelWorldPosition();
+        Vector3 screenPos = hudCamera.WorldToScreenPoint(worldPos);
+        if (screenPos.z <= 0f)
+        {
+            return;
+        }
+
+        screenPos.y = Screen.height - screenPos.y;
+
+        float w = 220f;
+        float h = 62f;
+        Rect rect = new Rect(screenPos.x - (w * 0.5f), screenPos.y - h, w, h);
+
+        if (hudStyle == null)
+        {
+            hudStyle = new GUIStyle(GUI.skin.label);
+            hudStyle.alignment = TextAnchor.UpperCenter;
+            hudStyle.fontStyle = FontStyle.Bold;
+            hudStyle.fontSize = 12;
+            hudStyle.clipping = TextClipping.Overflow;
+            hudStyle.normal.textColor = Color.white;
+        }
+
+        string labelText = GetLabelText();
+        GUI.color = Color.black;
+        GUI.Label(new Rect(rect.x + 1f, rect.y + 1f, rect.width, rect.height), labelText, hudStyle);
+        GUI.color = Color.white;
+        GUI.Label(rect, labelText, hudStyle);
+
+        if (visionSystem != null)
+        {
+            DrawSuspicionBar(new Vector2(screenPos.x, screenPos.y + 8f));
+        }
+
+        GUI.color = Color.white;
+    }
+
+    private static Camera ResolveHudCamera()
+    {
+        PlayerController playerController = Object.FindFirstObjectByType<PlayerController>();
+        if (playerController != null)
+        {
+            Camera playerCamera = playerController.GetComponentInChildren<Camera>();
+            if (playerCamera != null && playerCamera.enabled && playerCamera.gameObject.activeInHierarchy)
             {
-                return;
+                return playerCamera;
             }
         }
 
-        Camera mainCamera = Camera.main;
-        if (mainCamera == null)
+        Camera main = Camera.main;
+        if (main != null && main.enabled && main.gameObject.activeInHierarchy)
         {
-            return;
+            return main;
         }
 
-        Vector3 worldPosition = transform.position + Vector3.up * labelHeight;
-        Vector3 screenPoint = mainCamera.WorldToScreenPoint(worldPosition);
-        if (screenPoint.z <= 0f)
+        Camera[] cameras = Camera.allCameras;
+        for (int i = 0; i < cameras.Length; i++)
         {
-            return;
+            Camera camera = cameras[i];
+            if (camera != null && camera.enabled && camera.gameObject.activeInHierarchy && camera.cameraType == CameraType.Game)
+            {
+                return camera;
+            }
         }
 
-        EnsureStyles();
+        return null;
+    }
 
-        string stateLine = "STATE: " + guardAI.CurrentGuardState.ToString().ToUpperInvariant();
-        string nodeLine = "NODE: " + (string.IsNullOrEmpty(guardAI.ActiveNodeName) ? "None" : guardAI.ActiveNodeName);
-        string alertLine = "ALERT: " + GuardAlertSystem.CurrentAlert.ToString().ToUpperInvariant();
-        Color alertColor = EvaluateAlertColor(GuardAlertSystem.CurrentAlert);
-
-        float x = screenPoint.x;
-        float y = Screen.height - screenPoint.y;
-        DrawOutlinedLabel(new Vector2(x, y), stateLine, boldStyle);
-        DrawOutlinedLabel(new Vector2(x, y + 18f), nodeLine, regularStyle);
-        DrawOutlinedLabelColored(new Vector2(x, y + 36f), alertLine, alertStyle, alertColor);
-        DrawSuspicionBar(new Vector2(x, y - 18f));
+    private string GetLabelText()
+    {
+        string state = guardAI != null ? guardAI.CurrentGuardState.ToString().ToUpperInvariant() : "UNKNOWN";
+        string node = guardAI != null ? guardAI.ActiveNodeName : "-";
+        string alert = GuardAlertSystem.CurrentAlert.ToString().ToUpperInvariant();
+        return $"STATE: {state}\nNODE: {node}\nALERT: {alert}";
     }
 
     private void OnDrawGizmos()
@@ -306,5 +359,29 @@ public class GuardDebugVisualizer : MonoBehaviour
         {
             navMeshAgent = GetComponent<NavMeshAgent>();
         }
+
+        cachedRenderers = GetComponentsInChildren<Renderer>();
+    }
+
+    private Vector3 GetLabelWorldPosition()
+    {
+        if (cachedRenderers == null || cachedRenderers.Length == 0)
+        {
+            cachedRenderers = GetComponentsInChildren<Renderer>();
+        }
+
+        float highestY = transform.position.y + labelHeight;
+        for (int i = 0; i < cachedRenderers.Length; i++)
+        {
+            Renderer renderer = cachedRenderers[i];
+            if (renderer == null || !renderer.enabled)
+            {
+                continue;
+            }
+
+            highestY = Mathf.Max(highestY, renderer.bounds.max.y + 0.35f);
+        }
+
+        return new Vector3(transform.position.x, highestY, transform.position.z);
     }
 }
