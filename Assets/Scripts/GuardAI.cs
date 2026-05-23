@@ -53,10 +53,10 @@ public class GuardAI : MonoBehaviour
     [SerializeField]
     private PatrolSystem patrolSystem;
 
-    [Header("Search Tuning")]
     [SerializeField]
-    private float searchDurationSeconds = 3f;
+    private SearchSystem searchSystem;
 
+    [Header("Search Tuning")]
     [SerializeField]
     private float destinationEpsilon = 0.15f;
 
@@ -72,8 +72,10 @@ public class GuardAI : MonoBehaviour
     private bool hasLastKnownPosition;
     private Vector3 noiseSourcePosition;
     private bool hasNoiseSource;
-    private float searchEndTime = -1f;
+    private float searchTimer = 0f;
+    private bool searchStarted = false;
     private float defaultAgentSpeed = 3.5f;
+    private Sequence investigateSequence;
 
     /// <summary>
     /// Gets the last leaf node name evaluated by the behavior tree.
@@ -100,6 +102,11 @@ public class GuardAI : MonoBehaviour
             defaultAgentSpeed = navMeshAgent.speed;
         }
 
+        if (searchSystem == null)
+        {
+            searchSystem = GetComponent<SearchSystem>();
+        }
+
         root = BuildTree();
     }
 
@@ -116,6 +123,34 @@ public class GuardAI : MonoBehaviour
         }
 
         root.Evaluate();
+
+        if (investigateSequence == null)
+        {
+            return;
+        }
+
+        NodeState invState = investigateSequence.CurrentState;
+        bool investigateBranchLeafActive = lastActiveLeafNodeName == "HasLastKnownPosition"
+            || lastActiveLeafNodeName == "MoveToLastKnownPosition"
+            || lastActiveLeafNodeName == "SearchArea";
+        if (investigateBranchLeafActive && (invState == NodeState.Success || invState == NodeState.Failure))
+        {
+            if (invState == NodeState.Success)
+            {
+                Debug.Log("[GuardAI] Search complete - returning to patrol");
+            }
+            else
+            {
+                Debug.Log("[GuardAI] Investigate failed - returning to patrol");
+            }
+
+            visionSystem?.ClearLastKnownPosition();
+            hasLastKnownPosition = false;
+            searchStarted = false;
+            searchTimer = 0f;
+            searchSystem?.Reset();
+            navMeshAgent?.ResetPath();
+        }
     }
 
     private Node BuildTree()
@@ -130,7 +165,7 @@ public class GuardAI : MonoBehaviour
         suspiciousSequence.AddChild(new LambdaConditionNode("IsSuspicious", EvaluateIsSuspicious));
         suspiciousSequence.AddChild(new LambdaActionNode("TurnTowardSuspicion", EvaluateTurnTowardSuspicion));
 
-        Sequence investigateSequence = new Sequence("Investigate Sequence");
+        investigateSequence = new Sequence("Investigate Sequence");
         investigateSequence.AddChild(new LambdaConditionNode("HasLastKnownPosition", EvaluateHasLastKnownPosition));
         investigateSequence.AddChild(new LambdaActionNode("MoveToLastKnownPosition", EvaluateMoveToLastKnownPosition));
         investigateSequence.AddChild(new LambdaActionNode("SearchArea", EvaluateSearchArea));
@@ -202,7 +237,8 @@ public class GuardAI : MonoBehaviour
     {
         MarkLeafActive("TurnTowardSuspicion");
         currentGuardState = GuardState.Suspicious;
-        searchEndTime = -1f;
+        searchStarted = false;
+        searchTimer = 0f;
         SetAgentSpeedMultiplier(0.6f);
         if (navMeshAgent != null && navMeshAgent.enabled && navMeshAgent.isOnNavMesh)
         {
@@ -231,12 +267,24 @@ public class GuardAI : MonoBehaviour
     {
         MarkLeafActive("ChasePlayer");
         currentGuardState = GuardState.Chasing;
-        searchEndTime = -1f;
+        searchStarted = false;
+        searchTimer = 0f;
         SetAgentSpeedMultiplier(1f);
 
         if (!TryGetPlayerPosition(out Vector3 playerPosition))
         {
-            return NodeState.Failure;
+            if (visionSystem != null && visionSystem.HasLastKnownPosition)
+            {
+                playerPosition = visionSystem.LastKnownPosition;
+            }
+            else if (hasLastKnownPosition)
+            {
+                playerPosition = lastKnownPosition;
+            }
+            else
+            {
+                return NodeState.Failure;
+            }
         }
 
         SetDestination(playerPosition);
@@ -298,7 +346,6 @@ public class GuardAI : MonoBehaviour
 
         if (HasReachedDestination())
         {
-            searchEndTime = -1f;
             return NodeState.Success;
         }
 
@@ -309,22 +356,27 @@ public class GuardAI : MonoBehaviour
     {
         MarkLeafActive("SearchArea");
         currentGuardState = GuardState.Searching;
-        SetAgentSpeedMultiplier(1f);
+        SetAgentSpeedMultiplier(0.75f);
 
-        if (searchEndTime < 0f)
+        if (!searchStarted)
         {
-            searchEndTime = Time.time + Mathf.Max(0.1f, searchDurationSeconds);
+            searchTimer = 0f;
+            searchStarted = true;
+            searchSystem?.BeginSearch(lastKnownPosition);
         }
 
-        if (Time.time < searchEndTime)
+        searchTimer += Time.deltaTime;
+
+        bool allPointsVisited = searchSystem != null && searchSystem.Tick();
+
+        // Exit: either visited all points OR hard timeout.
+        if (allPointsVisited || searchTimer >= 8f)
         {
-            return NodeState.Running;
+            // Do not reset state here; Update() performs the centralized cleanup.
+            return NodeState.Success;
         }
 
-        searchEndTime = -1f;
-        hasLastKnownPosition = false;
-        visionSystem?.ClearLastKnownPosition();
-        return NodeState.Success;
+        return NodeState.Running;
     }
 
     private NodeState EvaluateHeardNoise()
@@ -405,7 +457,8 @@ public class GuardAI : MonoBehaviour
         }
 
         currentGuardState = GuardState.Patrolling;
-        searchEndTime = -1f;
+        searchStarted = false;
+        searchTimer = 0f;
         SetAgentSpeedMultiplier(1f);
 
         if (patrolSystem != null)
