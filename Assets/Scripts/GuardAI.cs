@@ -105,6 +105,10 @@ public class GuardAI : MonoBehaviour
         if (searchSystem == null)
         {
             searchSystem = GetComponent<SearchSystem>();
+            if (searchSystem == null)
+            {
+                searchSystem = gameObject.AddComponent<SearchSystem>();
+            }
         }
 
         root = BuildTree();
@@ -130,12 +134,11 @@ public class GuardAI : MonoBehaviour
         }
 
         NodeState invState = investigateSequence.CurrentState;
-        bool investigateBranchLeafActive = lastActiveLeafNodeName == "HasLastKnownPosition"
-            || lastActiveLeafNodeName == "MoveToLastKnownPosition"
-            || lastActiveLeafNodeName == "SearchArea";
-        if (investigateBranchLeafActive && (invState == NodeState.Success || invState == NodeState.Failure))
+        bool completedSearchThisTick = invState == NodeState.Success && lastActiveLeafNodeName == "SearchArea";
+        bool failedDuringActiveSearch = invState == NodeState.Failure && searchStarted;
+        if (completedSearchThisTick || failedDuringActiveSearch)
         {
-            if (invState == NodeState.Success)
+            if (completedSearchThisTick)
             {
                 Debug.Log("[GuardAI] Search complete - returning to patrol");
             }
@@ -320,6 +323,13 @@ public class GuardAI : MonoBehaviour
     private NodeState EvaluateMoveToLastKnownPosition()
     {
         MarkLeafActive("MoveToLastKnownPosition");
+
+        // Once search has started, this node must not keep overriding destinations.
+        if (searchStarted)
+        {
+            return NodeState.Success;
+        }
+
         currentGuardState = GuardState.Investigating;
         SetAgentSpeedMultiplier(1f);
 
