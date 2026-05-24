@@ -42,7 +42,20 @@ public static class GuardAlertSystem
     public static float AlertDecayTime { get; set; } = 15f;
 
     private static bool hasSeenPlayer;
+    private static bool hasActiveSuspicion;
     private static float lastSeenTime;
+
+    /// <summary>
+    /// Resets all global alert state to defaults.
+    /// </summary>
+    public static void Reset()
+    {
+        CurrentAlert = AlertLevel.Normal;
+        SharedLastKnownPosition = Vector3.zero;
+        hasSeenPlayer = false;
+        hasActiveSuspicion = false;
+        lastSeenTime = 0f;
+    }
 
     /// <summary>
     /// Reports that a guard has seen the player at a world position.
@@ -53,7 +66,24 @@ public static class GuardAlertSystem
         SharedLastKnownPosition = position;
         CurrentAlert = AlertLevel.FullAlert;
         hasSeenPlayer = true;
+        hasActiveSuspicion = true;
         lastSeenTime = Time.time;
+    }
+
+    /// <summary>
+    /// Reports a suspicious event that should raise global alert to suspicious when not already full alert.
+    /// </summary>
+    /// <param name="position">The suspicious world position.</param>
+    public static void ReportSuspicious(Vector3 position)
+    {
+        SharedLastKnownPosition = position;
+        hasActiveSuspicion = true;
+        lastSeenTime = Time.time;
+
+        if (CurrentAlert != AlertLevel.FullAlert)
+        {
+            CurrentAlert = AlertLevel.Suspicious;
+        }
     }
 
     /// <summary>
@@ -61,7 +91,7 @@ public static class GuardAlertSystem
     /// </summary>
     public static void Tick()
     {
-        if (!hasSeenPlayer)
+        if (!hasActiveSuspicion && !hasSeenPlayer)
         {
             CurrentAlert = AlertLevel.Normal;
             return;
@@ -73,15 +103,21 @@ public static class GuardAlertSystem
         if (elapsed >= decayDuration)
         {
             CurrentAlert = AlertLevel.Normal;
+            hasSeenPlayer = false;
+            hasActiveSuspicion = false;
             return;
         }
 
-        if (elapsed >= decayDuration * 0.5f)
+        if (hasSeenPlayer && elapsed < decayDuration * 0.5f)
+        {
+            CurrentAlert = AlertLevel.FullAlert;
+            return;
+        }
+
+        if (elapsed < decayDuration)
         {
             CurrentAlert = AlertLevel.Suspicious;
             return;
         }
-
-        CurrentAlert = AlertLevel.FullAlert;
     }
 }

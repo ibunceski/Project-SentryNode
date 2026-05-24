@@ -30,6 +30,9 @@ public class PlayerController : MonoBehaviour
     private float pitch;
     private float footstepNoiseTimer;
     private bool isCursorLocked;
+    private bool isCrouching;
+    private bool isSprinting;
+    private float currentSpeed;
 
     private void Start()
     {
@@ -55,9 +58,9 @@ public class PlayerController : MonoBehaviour
     {
         HandleCursorToggle();
         HandleLook();
-        bool isCrouching = Input.GetKey(KeyCode.C);
+        isCrouching = Input.GetKey(KeyCode.C);
         ApplyCrouch(isCrouching);
-        HandleMovement(isCrouching);
+        HandleMovement();
         HandleNoise();
         HandleInteractionNoise();
     }
@@ -85,21 +88,38 @@ public class PlayerController : MonoBehaviour
         }
     }
 
-    private void HandleMovement(bool isCrouching)
+    private void HandleMovement()
     {
-        float horizontal = Input.GetAxisRaw("Horizontal");
-        float vertical = Input.GetAxisRaw("Vertical");
-        Vector3 input = new Vector3(horizontal, 0f, vertical);
-        if (input.sqrMagnitude > 1f)
+        bool isCrouching = Input.GetKey(KeyCode.C);
+        bool isSprinting = Input.GetKey(KeyCode.LeftShift) && !isCrouching && characterController.isGrounded;
+
+        float currentSpeed;
+        if (isCrouching)
         {
-            input.Normalize();
+            currentSpeed = 1.5f;
+        }
+        else if (isSprinting)
+        {
+            currentSpeed = 6f;
+        }
+        else
+        {
+            currentSpeed = 3f;
         }
 
-        bool isRunning = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
-        float moveSpeed = isCrouching ? CrouchSpeed : (isRunning ? RunSpeed : WalkSpeed);
+        this.isCrouching = isCrouching;
+        this.isSprinting = isSprinting;
+        this.currentSpeed = currentSpeed;
 
-        Vector3 move = transform.TransformDirection(input) * moveSpeed;
-        characterController.Move(move * Time.deltaTime);
+        float h = Input.GetAxisRaw("Horizontal");
+        float v = Input.GetAxisRaw("Vertical");
+        Vector3 move = transform.right * h + transform.forward * v;
+        if (move.sqrMagnitude > 1f)
+        {
+            move.Normalize();
+        }
+
+        characterController.Move(move * currentSpeed * Time.deltaTime);
 
         if (characterController.isGrounded && velocity.y < 0f)
         {
@@ -112,17 +132,13 @@ public class PlayerController : MonoBehaviour
 
     private void HandleNoise()
     {
-        bool isCrouching = Input.GetKey(KeyCode.C);
         footstepNoiseTimer -= Time.deltaTime;
         if (isCrouching)
         {
             return;
         }
 
-        Vector3 horizontalVelocity = new Vector3(characterController.velocity.x, 0f, characterController.velocity.z);
-        float speed = horizontalVelocity.magnitude;
-
-        if (characterController.isGrounded && speed > FootstepNoiseThreshold && footstepNoiseTimer <= 0f)
+        if (isSprinting && characterController.isGrounded && footstepNoiseTimer <= 0f)
         {
             HearingSystem.ReportNoise(transform.position, 8f, HearingSystem.NoiseType.Footstep);
             footstepNoiseTimer = FootstepNoiseInterval;
@@ -131,10 +147,6 @@ public class PlayerController : MonoBehaviour
 
     private void HandleInteractionNoise()
     {
-        if (Input.GetKeyDown(KeyCode.F))
-        {
-            HearingSystem.ReportNoise(transform.position, 12f, HearingSystem.NoiseType.Interaction);
-        }
     }
 
     private void ApplyCrouch(bool isCrouching)

@@ -2,6 +2,7 @@ using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.AI;
+using UnityEngine.Rendering;
 using UnityEngine.SceneManagement;
 
 /// <summary>
@@ -13,6 +14,19 @@ public static class LevelBuilder
     private const string EnvironmentLayerName = "Environment";
     private const string PlayerLayerName = "Player";
     private const string GroundTagName = "Ground";
+
+    private static readonly Color FloorColor = Rgb(30, 30, 35);
+    private static readonly Color OuterWallColor = Rgb(55, 65, 80);
+    private static readonly Color InteriorColor = Rgb(70, 80, 95);
+    private static readonly Color CeilingColor = Rgb(20, 20, 25);
+    private static readonly Color GuardColor = Rgb(220, 100, 30);
+    private static readonly Color GuardEyeColor = Rgb(220, 40, 40);
+    private static readonly Color PlayerColor = Rgb(30, 180, 160);
+    private static readonly Color PatrolPointColor = Rgb(255, 210, 0);
+    private static readonly Color AmbientColor = Rgb(60, 60, 75);
+    private static readonly Color MainLightColor = Rgb(255, 245, 220);
+    private static readonly Color FillLightColor = Rgb(180, 200, 255);
+    private static readonly Color FallbackColor = Rgb(90, 95, 110);
 
     [MenuItem("Tools/Build Demo Level")]
     public static void BuildDemoLevel()
@@ -26,6 +40,10 @@ public static class LevelBuilder
             Debug.LogError("Level build aborted. Required layers could not be created.");
             return;
         }
+
+        RemoveExistingLights();
+        RemoveLegacyRoofObjects();
+        RemoveExistingCameras();
 
         GameObject existingRoot = GameObject.Find(RootName);
         if (existingRoot != null)
@@ -53,15 +71,19 @@ public static class LevelBuilder
             new Vector3(10f, 0f, 10f),
             environmentLayer,
             true);
-        CreatePlayer(root.transform, playerLayer);
-        Transform[] patrolPoints = CreatePatrolPoints(root.transform);
 
-        ConfigureGuardSystems(guardPrimary, patrolPoints, playerLayer, environmentLayer);
-        ConfigureGuardSystems(guardVariant, patrolPoints, playerLayer, environmentLayer);
+        GameObject player = CreatePlayer(root.transform, playerLayer);
+        Transform[] patrolPoints = CreatePatrolPoints(root.transform, environmentLayer);
+
+        ConfigureGuardSystems(guardPrimary, patrolPoints, player.transform, playerLayer, environmentLayer);
+        ConfigureGuardSystems(guardVariant, patrolPoints, player.transform, playerLayer, environmentLayer);
+
+        ApplyNamedSceneMaterials(root);
+        EnsureAllRenderersHaveExplicitMaterial();
 
         EditorSceneManager.MarkSceneDirty(SceneManager.GetActiveScene());
         UnityEditor.AI.NavMeshBuilder.BuildNavMesh();
-        Debug.Log("Demo level generated and NavMesh baked.");
+        Debug.Log("Demo level generated and NavMesh baked with readability color pass.");
     }
 
     private static void CreateFloor(Transform parent, int environmentLayer)
@@ -137,18 +159,27 @@ public static class LevelBuilder
     private static void CreateRandomObstacles(Transform parent, int environmentLayer)
     {
         Random.InitState(42);
+        Vector3[] reservedPositions =
+        {
+            new Vector3(-10f, 0f, -10f),
+            new Vector3(10f, 0f, 10f),
+            new Vector3(0f, 0f, 0f),
+            new Vector3(-12f, 0f, -12f),
+            new Vector3(12f, 0f, -12f),
+            new Vector3(12f, 0f, 12f),
+            new Vector3(-12f, 0f, 12f)
+        };
 
         for (int i = 0; i < 4; i++)
         {
             float width = Random.Range(1.2f, 3f);
             float depth = Random.Range(1.2f, 3f);
             float height = Random.Range(1.2f, 2.8f);
-            float x = Random.Range(-11f, 11f);
-            float z = Random.Range(-11f, 11f);
+            Vector3 position = FindObstaclePosition(reservedPositions, 3.5f);
 
             CreateCube(
                 "Obstacle_" + (i + 1),
-                new Vector3(x, height * 0.5f, z),
+                new Vector3(position.x, height * 0.5f, position.z),
                 new Vector3(width, height, depth),
                 parent,
                 environmentLayer);
@@ -157,14 +188,31 @@ public static class LevelBuilder
 
     private static void CreateLighting(Transform parent)
     {
-        GameObject lightObject = new GameObject("Directional Light");
-        lightObject.transform.SetParent(parent);
-        lightObject.transform.position = new Vector3(0f, 10f, 0f);
-        lightObject.transform.rotation = Quaternion.Euler(50f, -30f, 0f);
+        GameObject mainLightObject = new GameObject("Main Directional Light");
+        mainLightObject.transform.SetParent(parent);
+        mainLightObject.transform.position = new Vector3(0f, 8f, 0f);
+        mainLightObject.transform.rotation = Quaternion.Euler(45f, -30f, 0f);
 
-        Light directionalLight = lightObject.AddComponent<Light>();
-        directionalLight.type = LightType.Directional;
-        directionalLight.intensity = 1.2f;
+        Light mainDirectionalLight = mainLightObject.AddComponent<Light>();
+        mainDirectionalLight.type = LightType.Directional;
+        mainDirectionalLight.intensity = 1f;
+        mainDirectionalLight.color = MainLightColor;
+        mainDirectionalLight.shadows = LightShadows.Soft;
+        mainDirectionalLight.shadowStrength = 0.9f;
+
+        GameObject fillLightObject = new GameObject("Fill Directional Light");
+        fillLightObject.transform.SetParent(parent);
+        fillLightObject.transform.position = new Vector3(0f, 8f, 0f);
+        fillLightObject.transform.rotation = Quaternion.Euler(-30f, 150f, 0f);
+
+        Light fillDirectionalLight = fillLightObject.AddComponent<Light>();
+        fillDirectionalLight.type = LightType.Directional;
+        fillDirectionalLight.intensity = 0.3f;
+        fillDirectionalLight.color = FillLightColor;
+        fillDirectionalLight.shadows = LightShadows.None;
+
+        RenderSettings.ambientMode = AmbientMode.Flat;
+        RenderSettings.ambientLight = AmbientColor;
     }
 
     private static GuardBundle CreateGuardVariant(
@@ -208,6 +256,14 @@ public static class LevelBuilder
             SetLayerRecursively(guardVisual, environmentLayer);
         }
 
+        GameObject eyeIndicator = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        eyeIndicator.name = "EyeIndicator";
+        eyeIndicator.transform.SetParent(guard.transform);
+        eyeIndicator.transform.localPosition = new Vector3(0f, 1.35f, 0.58f);
+        eyeIndicator.transform.localScale = new Vector3(0.14f, 0.14f, 0.14f);
+        RemoveCollider(eyeIndicator);
+        SetLayerRecursively(eyeIndicator, environmentLayer);
+
         NavMeshAgent agent = guard.AddComponent<NavMeshAgent>();
         agent.speed = 3.5f;
         agent.stoppingDistance = 0.3f;
@@ -245,17 +301,28 @@ public static class LevelBuilder
 
         player.AddComponent<PlayerController>();
 
+        GameObject playerVisual = GameObject.CreatePrimitive(PrimitiveType.Capsule);
+        playerVisual.name = "PlayerVisual";
+        playerVisual.transform.SetParent(player.transform);
+        playerVisual.transform.localPosition = new Vector3(0f, 0.9f, 0f);
+        playerVisual.transform.localScale = new Vector3(0.7f, 0.9f, 0.7f);
+        RemoveCollider(playerVisual);
+        SetLayerRecursively(playerVisual, playerLayer);
+
         GameObject cameraObject = new GameObject("PlayerCamera");
         cameraObject.transform.SetParent(player.transform);
         cameraObject.transform.localPosition = new Vector3(0f, 1.6f, 0f);
         cameraObject.transform.localRotation = Quaternion.identity;
-        cameraObject.AddComponent<Camera>();
+        Camera camera = cameraObject.AddComponent<Camera>();
+        camera.clearFlags = CameraClearFlags.SolidColor;
+        camera.backgroundColor = Rgb(18, 22, 30);
+        camera.tag = "MainCamera";
         SetLayerRecursively(cameraObject, playerLayer);
 
         return player;
     }
 
-    private static Transform[] CreatePatrolPoints(Transform parent)
+    private static Transform[] CreatePatrolPoints(Transform parent, int environmentLayer)
     {
         Vector3[] points =
         {
@@ -271,13 +338,28 @@ public static class LevelBuilder
             GameObject point = new GameObject("PatrolPoint_" + (i + 1));
             point.transform.SetParent(parent);
             point.transform.position = points[i];
+            point.layer = environmentLayer;
+
+            GameObject marker = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            marker.name = "Marker";
+            marker.transform.SetParent(point.transform);
+            marker.transform.localPosition = new Vector3(0f, 0.05f, 0f);
+            marker.transform.localScale = new Vector3(0.4f, 0.05f, 0.4f);
+            RemoveCollider(marker);
+            SetLayerRecursively(marker, environmentLayer);
+
             patrolPoints[i] = point.transform;
         }
 
         return patrolPoints;
     }
 
-    private static void ConfigureGuardSystems(GuardBundle guardBundle, Transform[] patrolPoints, int playerLayer, int environmentLayer)
+    private static void ConfigureGuardSystems(
+        GuardBundle guardBundle,
+        Transform[] patrolPoints,
+        Transform playerTarget,
+        int playerLayer,
+        int environmentLayer)
     {
         SerializedObject guardAiSerialized = new SerializedObject(guardBundle.GuardAI);
         guardAiSerialized.FindProperty("navMeshAgent").objectReferenceValue = guardBundle.Agent;
@@ -294,11 +376,21 @@ public static class LevelBuilder
             patrolPointsProperty.GetArrayElementAtIndex(i).objectReferenceValue = patrolPoints[i];
         }
 
+        if (guardBundle.Root != null && guardBundle.Root.name.Contains("Guard_B"))
+        {
+            SerializedProperty waypointIndexProperty = patrolSerialized.FindProperty("currentWaypointIndex");
+            if (waypointIndexProperty != null)
+            {
+                waypointIndexProperty.intValue = 2;
+            }
+        }
+
         patrolSerialized.ApplyModifiedPropertiesWithoutUndo();
 
         SerializedObject visionSerialized = new SerializedObject(guardBundle.VisionSystem);
         visionSerialized.FindProperty("obstacleMask").intValue = 1 << environmentLayer;
         visionSerialized.FindProperty("playerMask").intValue = 1 << playerLayer;
+        visionSerialized.FindProperty("playerTarget").objectReferenceValue = playerTarget;
         visionSerialized.ApplyModifiedPropertiesWithoutUndo();
     }
 
@@ -314,6 +406,186 @@ public static class LevelBuilder
         return cube;
     }
 
+    private static void ApplyNamedSceneMaterials(GameObject root)
+    {
+        if (root == null)
+        {
+            return;
+        }
+
+        Renderer[] renderers = root.GetComponentsInChildren<Renderer>(true);
+        for (int i = 0; i < renderers.Length; i++)
+        {
+            Renderer renderer = renderers[i];
+            if (renderer == null)
+            {
+                continue;
+            }
+
+            string rendererName = renderer.gameObject.name;
+            string lowerName = rendererName.ToLowerInvariant();
+
+            if (rendererName == "Floor")
+            {
+                SetMaterial(renderer, FloorColor, 0f, 0.1f);
+                continue;
+            }
+
+            if (rendererName.StartsWith("Wall_"))
+            {
+                SetMaterial(renderer, OuterWallColor, 0f, 0.05f);
+                continue;
+            }
+
+            if (rendererName.StartsWith("Divider_") || rendererName.StartsWith("Obstacle_"))
+            {
+                SetMaterial(renderer, InteriorColor, 0f, 0.08f);
+                continue;
+            }
+
+            if (rendererName == "GuardVisual" || rendererName == "GuardVariantBody" || rendererName == "GuardVariantHead")
+            {
+                SetMaterial(renderer, GuardColor, 0f, 0.2f);
+                continue;
+            }
+
+            if (rendererName == "EyeIndicator")
+            {
+                SetMaterial(renderer, GuardEyeColor, 0f, 0.18f, GuardEyeColor * 0.45f);
+                continue;
+            }
+
+            if (rendererName == "PlayerVisual")
+            {
+                SetMaterial(renderer, PlayerColor, 0f, 0.18f);
+                continue;
+            }
+
+            if (rendererName == "Marker")
+            {
+                SetMaterial(renderer, PatrolPointColor, 0f, 0.2f, PatrolPointColor * 0.2f);
+                continue;
+            }
+
+            if (lowerName.Contains("ceiling") || lowerName.Contains("roof") || lowerName.Contains("cover") || lowerName.Contains("top"))
+            {
+                SetMaterial(renderer, CeilingColor, 0f, 0.02f);
+                continue;
+            }
+
+            SetMaterial(renderer, FallbackColor, 0f, 0.08f);
+        }
+    }
+
+    private static void EnsureAllRenderersHaveExplicitMaterial()
+    {
+        Renderer[] renderers = Object.FindObjectsByType<Renderer>(FindObjectsSortMode.None);
+        for (int i = 0; i < renderers.Length; i++)
+        {
+            Renderer renderer = renderers[i];
+            if (renderer == null)
+            {
+                continue;
+            }
+
+            Material material = renderer.material;
+            if (material == null)
+            {
+                renderer.material = CreateStandardMaterial(FallbackColor, 0f, 0.08f, null);
+            }
+        }
+    }
+
+    private static void SetMaterial(Renderer renderer, Color color, float metallic, float smoothness, Color? emission = null)
+    {
+        if (renderer == null)
+        {
+            return;
+        }
+
+        renderer.material = CreateStandardMaterial(color, metallic, smoothness, emission);
+    }
+
+    private static Material CreateStandardMaterial(Color color, float metallic, float smoothness, Color? emission)
+    {
+        Shader shader = Shader.Find("Standard");
+        Material material = new Material(shader);
+        material.color = color;
+        material.SetFloat("_Metallic", Mathf.Clamp01(metallic));
+        material.SetFloat("_Glossiness", Mathf.Clamp01(smoothness));
+
+        if (emission.HasValue)
+        {
+            material.EnableKeyword("_EMISSION");
+            material.SetColor("_EmissionColor", emission.Value);
+        }
+
+        return material;
+    }
+
+    private static Vector3 FindObstaclePosition(Vector3[] reservedPositions, float minDistance)
+    {
+        const int maxAttempts = 40;
+        for (int i = 0; i < maxAttempts; i++)
+        {
+            Vector3 candidate = new Vector3(Random.Range(-11f, 11f), 0f, Random.Range(-11f, 11f));
+            bool tooClose = false;
+
+            for (int j = 0; j < reservedPositions.Length; j++)
+            {
+                if (Vector3.Distance(candidate, reservedPositions[j]) < minDistance)
+                {
+                    tooClose = true;
+                    break;
+                }
+            }
+
+            if (!tooClose)
+            {
+                return candidate;
+            }
+        }
+
+        return new Vector3(Random.Range(-9f, 9f), 0f, Random.Range(-9f, 9f));
+    }
+
+    private static void RemoveLegacyRoofObjects()
+    {
+        string[] roofNames = { "Ceiling", "Roof", "Top", "Cover" };
+        for (int i = 0; i < roofNames.Length; i++)
+        {
+            GameObject roof = GameObject.Find(roofNames[i]);
+            if (roof != null)
+            {
+                Object.DestroyImmediate(roof);
+            }
+        }
+    }
+
+    private static void RemoveExistingLights()
+    {
+        Light[] existingLights = Object.FindObjectsByType<Light>(FindObjectsSortMode.None);
+        for (int i = 0; i < existingLights.Length; i++)
+        {
+            if (existingLights[i] != null)
+            {
+                Object.DestroyImmediate(existingLights[i].gameObject);
+            }
+        }
+    }
+
+    private static void RemoveExistingCameras()
+    {
+        Camera[] cameras = Object.FindObjectsByType<Camera>(FindObjectsSortMode.None);
+        for (int i = 0; i < cameras.Length; i++)
+        {
+            if (cameras[i] != null)
+            {
+                Object.DestroyImmediate(cameras[i].gameObject);
+            }
+        }
+    }
+
     private static void RemoveCollider(GameObject gameObject)
     {
         Collider collider = gameObject.GetComponent<Collider>();
@@ -321,6 +593,11 @@ public static class LevelBuilder
         {
             Object.DestroyImmediate(collider);
         }
+    }
+
+    private static Color Rgb(byte r, byte g, byte b)
+    {
+        return new Color32(r, g, b, 255);
     }
 
     private static void SetLayerRecursively(GameObject root, int layer)
