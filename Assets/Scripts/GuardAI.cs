@@ -274,7 +274,35 @@ public class GuardAI : MonoBehaviour
         searchTimer = 0f;
         SetAgentSpeedMultiplier(1f);
 
-        if (!TryGetPlayerPosition(out Vector3 playerPosition))
+        bool hasLineOfSight = false;
+        Vector3 playerPosition = default;
+        bool hasLivePlayerPosition = false;
+
+        if (visionSystem != null)
+        {
+            hasLineOfSight = visionSystem.PlayerTransform != null;
+            if (visionSystem.PlayerTransform != null)
+            {
+                playerPosition = visionSystem.PlayerTransform.position;
+                hasLivePlayerPosition = true;
+            }
+        }
+
+        if (!hasLivePlayerPosition)
+        {
+            GameObject playerObject = GameObject.FindWithTag("Player");
+            if (playerObject != null)
+            {
+                playerPosition = playerObject.transform.position;
+                hasLivePlayerPosition = true;
+            }
+        }
+
+        if (!hasLivePlayerPosition && TryGetPlayerPosition(out Vector3 trackedPlayerPosition))
+        {
+            playerPosition = trackedPlayerPosition;
+        }
+        else if (!hasLivePlayerPosition)
         {
             if (visionSystem != null && visionSystem.HasLastKnownPosition)
             {
@@ -286,8 +314,23 @@ public class GuardAI : MonoBehaviour
             }
             else
             {
-                return NodeState.Failure;
+                playerPosition = transform.position;
             }
+        }
+
+        float closeProximityThreshold = 1.5f;
+        if (navMeshAgent != null)
+        {
+            closeProximityThreshold = Mathf.Max(
+                closeProximityThreshold,
+                navMeshAgent.stoppingDistance + navMeshAgent.radius + destinationEpsilon);
+        }
+
+        bool playerIsClose = Vector3.Distance(transform.position, playerPosition) <= closeProximityThreshold;
+
+        if (!hasLineOfSight && !playerIsClose)
+        {
+            return NodeState.Failure;
         }
 
         SetDestination(playerPosition);
@@ -295,9 +338,26 @@ public class GuardAI : MonoBehaviour
         hasLastKnownPosition = true;
         GuardAlertSystem.ReportPlayerSeen(playerPosition);
 
-        if (HasReachedDestination())
+        if (navMeshAgent != null && navMeshAgent.enabled && navMeshAgent.isOnNavMesh)
         {
-            return NodeState.Success;
+            if (playerIsClose)
+            {
+                navMeshAgent.isStopped = true;
+                navMeshAgent.ResetPath();
+            }
+            else
+            {
+                navMeshAgent.isStopped = false;
+            }
+        }
+
+        Vector3 toPlayer = playerPosition - transform.position;
+        toPlayer.y = 0f;
+        if (toPlayer.sqrMagnitude > 0.0001f)
+        {
+            float turnSpeed = navMeshAgent != null ? navMeshAgent.angularSpeed : 360f;
+            Quaternion targetRotation = Quaternion.LookRotation(toPlayer.normalized, Vector3.up);
+            transform.rotation = Quaternion.RotateTowards(transform.rotation, targetRotation, turnSpeed * Time.deltaTime);
         }
 
         return NodeState.Running;
