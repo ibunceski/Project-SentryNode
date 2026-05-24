@@ -54,6 +54,21 @@ public class VisionSystem : MonoBehaviour
     private bool hasRaycastTargetPosition;
 
     /// <summary>
+    /// Gets the vision range used for field-of-view checks.
+    /// </summary>
+    public float ViewDistance => viewDistance;
+
+    /// <summary>
+    /// Gets the full field-of-view angle in degrees.
+    /// </summary>
+    public float FieldOfViewAngle => fieldOfViewAngle;
+
+    /// <summary>
+    /// Gets the mask used to occlude guard vision rays.
+    /// </summary>
+    public LayerMask OcclusionMask => obstacleMask & ~playerMask;
+
+    /// <summary>
     /// Gets the last known player position recorded by this vision system.
     /// </summary>
     public Vector3 LastKnownPosition { get; private set; }
