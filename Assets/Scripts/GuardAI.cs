@@ -97,6 +97,11 @@ public class GuardAI : MonoBehaviour
     /// </summary>
     private void Start()
     {
+        if (GetComponent<GuardVisionRenderer>() == null)
+        {
+            gameObject.AddComponent<GuardVisionRenderer>();
+        }
+
         if (navMeshAgent != null)
         {
             defaultAgentSpeed = navMeshAgent.speed;
