@@ -3,39 +3,44 @@ using UnityEngine;
 using UnityEngine.AI;
 
 /// <summary>
-/// Handles waypoint-based patrol behavior for a guard.
+/// Handles dynamic random wandering patrol behavior for a guard.
 /// </summary>
 public class PatrolSystem : MonoBehaviour
 {
     [SerializeField]
-    private Transform[] patrolPoints;
+    private float minWanderRadius = 4f;
+
+    [SerializeField]
+    private float maxWanderRadius = 14f;
+
+    [SerializeField]
+    private float minStepDistance = 6f;
 
     [SerializeField]
     private float waypointTolerance = 0.5f;
 
     [SerializeField]
-    private float waitAtWaypointDuration = 1f;
+    private float minWaitDuration = 0.5f;
 
     [SerializeField]
-    private int currentWaypointIndex;
+    private float maxWaitDuration = 1.5f;
 
+    [SerializeField]
+    private int maxSampleAttempts = 12;
+
+    [SerializeField]
+    private float navMeshSampleRange = 1.5f;
+
+    private bool hasWanderTarget;
+    private Vector3 currentWanderTarget;
     private float waitEndTime = -1f;
-    private bool pendingAdvanceAfterWait;
 
     /// <summary>
     /// Gets the current patrol target point in world space.
     /// </summary>
     public Vector3 CurrentPatrolPoint
     {
-        get
-        {
-            if (!HasPatrolPoints())
-            {
-                return transform.position;
-            }
-
-            return patrolPoints[currentWaypointIndex].position;
-        }
+        get => hasWanderTarget ? currentWanderTarget : transform.position;
     }
 
     /// <summary>
@@ -45,94 +50,52 @@ public class PatrolSystem : MonoBehaviour
     /// <returns>Always <see cref="NodeState.Running"/> because patrol is a continuous fallback behavior.</returns>
     public NodeState Patrol(NavMeshAgent agent)
     {
-        if (!HasPatrolPoints())
-        {
-            return NodeState.Running;
-        }
-
         if (agent == null || !agent.enabled || !agent.isOnNavMesh)
         {
             return NodeState.Running;
         }
 
-        Vector3 target = patrolPoints[currentWaypointIndex].position;
-        bool currentlyWaiting = waitEndTime > Time.time;
-        if (currentlyWaiting)
+        if (IsWaiting())
         {
             agent.isStopped = true;
             return NodeState.Running;
         }
 
-        if (pendingAdvanceAfterWait)
+        if (waitEndTime >= 0f)
         {
-            pendingAdvanceAfterWait = false;
-            AdvanceWaypoint();
-            target = patrolPoints[currentWaypointIndex].position;
+            waitEndTime = -1f;
+            ClearCurrentTarget();
+        }
+
+        if (!hasWanderTarget)
+        {
+            hasWanderTarget = TryPickRandomWanderTarget(agent, out currentWanderTarget);
+            if (!hasWanderTarget)
+            {
+                agent.isStopped = false;
+                return NodeState.Running;
+            }
         }
 
         agent.isStopped = false;
-        agent.SetDestination(target);
+        agent.SetDestination(currentWanderTarget);
 
-        if (HasReachedWaypoint(agent, target))
+        if (HasReachedWaypoint(agent, currentWanderTarget))
         {
-            waitEndTime = Time.time + Mathf.Max(0f, waitAtWaypointDuration);
-            pendingAdvanceAfterWait = true;
+            waitEndTime = Time.time + GetRandomWaitDuration();
+            agent.isStopped = true;
         }
 
         return NodeState.Running;
     }
 
     /// <summary>
-    /// Resets patrol to the nearest patrol point from the guard's current position.
+    /// Clears current patrol target so a fresh point is chosen immediately.
     /// </summary>
     public void ResetPatrol()
     {
-        if (!HasPatrolPoints())
-        {
-            return;
-        }
-
-        int nearestIndex = 0;
-        float nearestDistance = float.MaxValue;
-        Vector3 guardPosition = transform.position;
-
-        for (int i = 0; i < patrolPoints.Length; i++)
-        {
-            Transform point = patrolPoints[i];
-            if (point == null)
-            {
-                continue;
-            }
-
-            float distance = Vector3.Distance(guardPosition, point.position);
-            if (distance < nearestDistance)
-            {
-                nearestDistance = distance;
-                nearestIndex = i;
-            }
-        }
-
-        currentWaypointIndex = nearestIndex;
         waitEndTime = -1f;
-        pendingAdvanceAfterWait = false;
-    }
-
-    private bool HasPatrolPoints()
-    {
-        if (patrolPoints == null || patrolPoints.Length == 0)
-        {
-            return false;
-        }
-
-        for (int i = 0; i < patrolPoints.Length; i++)
-        {
-            if (patrolPoints[i] != null)
-            {
-                return true;
-            }
-        }
-
-        return false;
+        ClearCurrentTarget();
     }
 
     private bool HasReachedWaypoint(NavMeshAgent agent, Vector3 waypoint)
@@ -152,107 +115,93 @@ public class PatrolSystem : MonoBehaviour
         return !agent.hasPath || agent.velocity.sqrMagnitude <= 0.0001f || agent.remainingDistance <= effectiveTolerance;
     }
 
-    private void AdvanceWaypoint()
+    private bool TryPickRandomWanderTarget(NavMeshAgent agent, out Vector3 target)
     {
-        if (patrolPoints == null || patrolPoints.Length == 0)
-        {
-            return;
-        }
+        target = default;
 
-        int nextIndex = currentWaypointIndex;
-        int attempts = patrolPoints.Length;
+        float clampedMin = Mathf.Max(0f, minWanderRadius);
+        float clampedMax = Mathf.Max(clampedMin, maxWanderRadius);
+        float clampedMinStep = Mathf.Clamp(minStepDistance, 0f, clampedMax);
+        int attempts = Mathf.Max(1, maxSampleAttempts);
+        float sampleRange = Mathf.Max(0.25f, navMeshSampleRange);
 
         for (int i = 0; i < attempts; i++)
         {
-            nextIndex = (nextIndex + 1) % patrolPoints.Length;
-            if (patrolPoints[nextIndex] != null)
+            // Bias toward farther radii so patrol covers more of the area.
+            float radiusT = Mathf.Pow(Random.value, 0.35f);
+            float radius = Mathf.Lerp(clampedMin, clampedMax, radiusT);
+            Vector2 randomCircle = Random.insideUnitCircle.normalized * radius;
+            if (randomCircle.sqrMagnitude <= 0.0001f)
             {
-                currentWaypointIndex = nextIndex;
-                return;
+                randomCircle = Vector2.right * radius;
+            }
+
+            Vector3 candidate = transform.position + new Vector3(randomCircle.x, 0f, randomCircle.y);
+            if (NavMesh.SamplePosition(candidate, out NavMeshHit hit, sampleRange, NavMesh.AllAreas))
+            {
+                float stepDistance = Vector3.Distance(transform.position, hit.position);
+                if (stepDistance < clampedMinStep)
+                {
+                    continue;
+                }
+
+                target = hit.position;
+                return true;
             }
         }
+
+        // Relax only distance constraint first (still respects sample range) to avoid stalling.
+        for (int i = 0; i < attempts; i++)
+        {
+            float radius = Random.Range(clampedMin, clampedMax);
+            Vector2 randomCircle = Random.insideUnitCircle.normalized * radius;
+            if (randomCircle.sqrMagnitude <= 0.0001f)
+            {
+                randomCircle = Vector2.right * radius;
+            }
+
+            Vector3 candidate = transform.position + new Vector3(randomCircle.x, 0f, randomCircle.y);
+            if (NavMesh.SamplePosition(candidate, out NavMeshHit hit, sampleRange, NavMesh.AllAreas))
+            {
+                target = hit.position;
+                return true;
+            }
+        }
+
+        // Fallback sample near the guard so patrol can recover in sparse navmesh areas.
+        if (NavMesh.SamplePosition(transform.position, out NavMeshHit fallbackHit, Mathf.Max(1f, agent.radius * 2f), NavMesh.AllAreas))
+        {
+            target = fallbackHit.position;
+            return true;
+        }
+
+        return false;
+    }
+
+    private float GetRandomWaitDuration()
+    {
+        float minWait = Mathf.Max(0f, minWaitDuration);
+        float maxWait = Mathf.Max(minWait, maxWaitDuration);
+        return Random.Range(minWait, maxWait);
+    }
+
+    private bool IsWaiting()
+    {
+        return waitEndTime >= 0f && Time.time < waitEndTime;
+    }
+
+    private void ClearCurrentTarget()
+    {
+        hasWanderTarget = false;
+        currentWanderTarget = default;
     }
 
     private void OnDrawGizmos()
     {
-        if (!HasPatrolPoints())
+        if (hasWanderTarget)
         {
-            return;
+            Gizmos.color = Color.yellow;
+            Gizmos.DrawLine(transform.position, currentWanderTarget);
         }
-
-        Gizmos.color = Color.yellow;
-
-        for (int i = 0; i < patrolPoints.Length; i++)
-        {
-            Transform point = patrolPoints[i];
-            if (point == null)
-            {
-                continue;
-            }
-
-            Gizmos.DrawSphere(point.position, 0.15f);
-
-            Transform nextPoint = FindNextValidPoint(i);
-            if (nextPoint != null)
-            {
-                Gizmos.DrawLine(point.position, nextPoint.position);
-            }
-        }
-
-        Transform currentTarget = GetCurrentTargetTransform();
-        if (currentTarget != null)
-        {
-            Gizmos.color = Color.cyan;
-            Gizmos.DrawLine(transform.position, currentTarget.position);
-        }
-    }
-
-    private Transform GetCurrentTargetTransform()
-    {
-        if (patrolPoints == null || patrolPoints.Length == 0)
-        {
-            return null;
-        }
-
-        if (currentWaypointIndex < 0 || currentWaypointIndex >= patrolPoints.Length)
-        {
-            currentWaypointIndex = Mathf.Clamp(currentWaypointIndex, 0, patrolPoints.Length - 1);
-        }
-
-        if (patrolPoints[currentWaypointIndex] != null)
-        {
-            return patrolPoints[currentWaypointIndex];
-        }
-
-        for (int i = 0; i < patrolPoints.Length; i++)
-        {
-            if (patrolPoints[i] != null)
-            {
-                currentWaypointIndex = i;
-                return patrolPoints[i];
-            }
-        }
-
-        return null;
-    }
-
-    private Transform FindNextValidPoint(int fromIndex)
-    {
-        if (patrolPoints == null || patrolPoints.Length <= 1)
-        {
-            return null;
-        }
-
-        for (int offset = 1; offset <= patrolPoints.Length; offset++)
-        {
-            int index = (fromIndex + offset) % patrolPoints.Length;
-            Transform point = patrolPoints[index];
-            if (point != null)
-            {
-                return point;
-            }
-        }
-
-        return null;
     }
 }
