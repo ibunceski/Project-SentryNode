@@ -42,13 +42,13 @@ public class PlayerController : MonoBehaviour
 
     [Header("Footstep Volume")]
     [SerializeField]
-    private float walkFootstepVolume = 0.6f;
+    private float walkFootstepVolume = 0.35f;
 
     [SerializeField]
-    private float sprintFootstepVolume = 0.85f;
+    private float sprintFootstepVolume = 0.6f;
 
     [SerializeField]
-    private float crouchFootstepVolume = 0.35f;
+    private float crouchFootstepVolume = 0.2f;
 
     [Header("Footstep Noise")]
     [SerializeField]
@@ -195,6 +195,11 @@ public class PlayerController : MonoBehaviour
         if (!characterController.isGrounded || !isMoving)
         {
             footstepTimer = 0f;
+            if (footstepAudioSource != null && footstepAudioSource.isPlaying)
+            {
+                footstepAudioSource.Stop();
+            }
+
             return;
         }
 
