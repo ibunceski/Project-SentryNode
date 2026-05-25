@@ -6,14 +6,62 @@ using UnityEngine;
 [RequireComponent(typeof(CharacterController))]
 public class PlayerController : MonoBehaviour
 {
+    [Header("Look")]
     [SerializeField]
     private float mouseSensitivity = 2f;
 
+    [Header("References")]
     [SerializeField]
     private CharacterController characterController;
 
     [SerializeField]
     private Transform cameraTransform;
+
+    [SerializeField]
+    private AudioSource footstepAudioSource;
+
+    [Header("Footstep Clips")]
+    [SerializeField]
+    private AudioClip walkFootstepClip;
+
+    [SerializeField]
+    private AudioClip sprintFootstepClip;
+
+    [SerializeField]
+    private AudioClip crouchFootstepClip;
+
+    [Header("Footstep Timing")]
+    [SerializeField]
+    private float walkFootstepInterval = 0.5f;
+
+    [SerializeField]
+    private float sprintFootstepInterval = 0.3f;
+
+    [SerializeField]
+    private float crouchFootstepInterval = 0.75f;
+
+    [Header("Footstep Volume")]
+    [SerializeField]
+    private float walkFootstepVolume = 0.6f;
+
+    [SerializeField]
+    private float sprintFootstepVolume = 0.85f;
+
+    [SerializeField]
+    private float crouchFootstepVolume = 0.35f;
+
+    [Header("Footstep Noise")]
+    [SerializeField]
+    private float walkNoiseRadius = 4.5f;
+
+    [SerializeField]
+    private float sprintNoiseRadius = 8f;
+
+    [SerializeField]
+    private float crouchNoiseRadius = 0f;
+
+    [SerializeField]
+    private float moveInputThreshold = 0.01f;
 
     private const float WalkSpeed = 3f;
     private const float RunSpeed = 6f;
@@ -23,16 +71,14 @@ public class PlayerController : MonoBehaviour
     private const float CrouchHeight = 1f;
     private const float NormalCameraY = 1.6f;
     private const float CrouchCameraY = 0.5f;
-    private const float FootstepNoiseThreshold = 4.5f;
-    private const float FootstepNoiseInterval = 0.4f;
 
     private Vector3 velocity;
     private float pitch;
-    private float footstepNoiseTimer;
+    private float footstepTimer;
     private bool isCursorLocked;
     private bool isCrouching;
     private bool isSprinting;
-    private float currentSpeed;
+    private bool isMoving;
 
     private void Start()
     {
@@ -50,6 +96,18 @@ public class PlayerController : MonoBehaviour
             }
         }
 
+        if (footstepAudioSource == null)
+        {
+            footstepAudioSource = GetComponent<AudioSource>();
+            if (footstepAudioSource == null)
+            {
+                footstepAudioSource = gameObject.AddComponent<AudioSource>();
+            }
+        }
+
+        footstepAudioSource.loop = false;
+        footstepAudioSource.playOnAwake = false;
+
         ApplyCrouch(false);
         SetCursorLock(true);
     }
@@ -61,7 +119,7 @@ public class PlayerController : MonoBehaviour
         isCrouching = Input.GetKey(KeyCode.C);
         ApplyCrouch(isCrouching);
         HandleMovement();
-        HandleNoise();
+        HandleFootsteps();
         HandleInteractionNoise();
     }
 
@@ -96,24 +154,24 @@ public class PlayerController : MonoBehaviour
         float currentSpeed;
         if (isCrouching)
         {
-            currentSpeed = 1.5f;
+            currentSpeed = CrouchSpeed;
         }
         else if (isSprinting)
         {
-            currentSpeed = 6f;
+            currentSpeed = RunSpeed;
         }
         else
         {
-            currentSpeed = 3f;
+            currentSpeed = WalkSpeed;
         }
 
         this.isCrouching = isCrouching;
         this.isSprinting = isSprinting;
-        this.currentSpeed = currentSpeed;
 
         float h = Input.GetAxisRaw("Horizontal");
         float v = Input.GetAxisRaw("Vertical");
         Vector3 move = transform.right * h + transform.forward * v;
+        isMoving = move.sqrMagnitude > moveInputThreshold;
         if (move.sqrMagnitude > 1f)
         {
             move.Normalize();
@@ -130,19 +188,59 @@ public class PlayerController : MonoBehaviour
         characterController.Move(velocity * Time.deltaTime);
     }
 
-    private void HandleNoise()
+    private void HandleFootsteps()
     {
-        footstepNoiseTimer -= Time.deltaTime;
+        footstepTimer -= Time.deltaTime;
+
+        if (!characterController.isGrounded || !isMoving)
+        {
+            footstepTimer = 0f;
+            return;
+        }
+
+        float interval;
+        float volume;
+        float noiseRadius;
+        AudioClip clip;
+
         if (isCrouching)
+        {
+            interval = Mathf.Max(0.05f, crouchFootstepInterval);
+            volume = Mathf.Clamp01(crouchFootstepVolume);
+            noiseRadius = Mathf.Max(0f, crouchNoiseRadius);
+            clip = crouchFootstepClip != null ? crouchFootstepClip : walkFootstepClip;
+        }
+        else if (isSprinting)
+        {
+            interval = Mathf.Max(0.05f, sprintFootstepInterval);
+            volume = Mathf.Clamp01(sprintFootstepVolume);
+            noiseRadius = Mathf.Max(0f, sprintNoiseRadius);
+            clip = sprintFootstepClip != null ? sprintFootstepClip : walkFootstepClip;
+        }
+        else
+        {
+            interval = Mathf.Max(0.05f, walkFootstepInterval);
+            volume = Mathf.Clamp01(walkFootstepVolume);
+            noiseRadius = Mathf.Max(0f, walkNoiseRadius);
+            clip = walkFootstepClip;
+        }
+
+        if (footstepTimer > 0f)
         {
             return;
         }
 
-        if (isSprinting && characterController.isGrounded && footstepNoiseTimer <= 0f)
+        if (clip != null && footstepAudioSource != null)
         {
-            HearingSystem.ReportNoise(transform.position, 8f, HearingSystem.NoiseType.Footstep);
-            footstepNoiseTimer = FootstepNoiseInterval;
+            footstepAudioSource.PlayOneShot(clip, volume);
         }
+
+        if (noiseRadius > 0f)
+        {
+            HearingSystem.ReportNoise(transform.position, noiseRadius, HearingSystem.NoiseType.Footstep);
+        }
+
+        footstepTimer = interval;
     }
 
     private void HandleInteractionNoise()
