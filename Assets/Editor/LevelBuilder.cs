@@ -58,6 +58,7 @@ public static class LevelBuilder
         CreateInteriorDividers(root.transform, environmentLayer);
         CreateRandomObstacles(root.transform, environmentLayer);
         CreateLighting(root.transform);
+        UnityEditor.AI.NavMeshBuilder.BuildNavMesh();
 
         GuardBundle guardPrimary = CreateGuardVariant(
             root.transform,
@@ -73,16 +74,15 @@ public static class LevelBuilder
             true);
 
         GameObject player = CreatePlayer(root.transform, playerLayer);
-        Transform[] patrolPoints = CreatePatrolPoints(root.transform, environmentLayer);
+        _ = CreatePatrolPoints(root.transform, environmentLayer);
 
-        ConfigureGuardSystems(guardPrimary, patrolPoints, player.transform, playerLayer, environmentLayer);
-        ConfigureGuardSystems(guardVariant, patrolPoints, player.transform, playerLayer, environmentLayer);
+        ConfigureGuardSystems(guardPrimary, player.transform, playerLayer, environmentLayer);
+        ConfigureGuardSystems(guardVariant, player.transform, playerLayer, environmentLayer);
 
         ApplyNamedSceneMaterials(root);
         EnsureAllRenderersHaveExplicitMaterial();
 
         EditorSceneManager.MarkSceneDirty(SceneManager.GetActiveScene());
-        UnityEditor.AI.NavMeshBuilder.BuildNavMesh();
         Debug.Log("Demo level generated and NavMesh baked with readability color pass.");
     }
 
@@ -317,6 +317,7 @@ public static class LevelBuilder
         camera.clearFlags = CameraClearFlags.SolidColor;
         camera.backgroundColor = Rgb(18, 22, 30);
         camera.tag = "MainCamera";
+        cameraObject.AddComponent<AudioListener>();
         SetLayerRecursively(cameraObject, playerLayer);
 
         return player;
@@ -356,7 +357,6 @@ public static class LevelBuilder
 
     private static void ConfigureGuardSystems(
         GuardBundle guardBundle,
-        Transform[] patrolPoints,
         Transform playerTarget,
         int playerLayer,
         int environmentLayer)
@@ -366,26 +366,19 @@ public static class LevelBuilder
         guardAiSerialized.FindProperty("visionSystem").objectReferenceValue = guardBundle.VisionSystem;
         guardAiSerialized.FindProperty("hearingSystem").objectReferenceValue = guardBundle.HearingSystem;
         guardAiSerialized.FindProperty("patrolSystem").objectReferenceValue = guardBundle.PatrolSystem;
-        guardAiSerialized.ApplyModifiedPropertiesWithoutUndo();
-
-        SerializedObject patrolSerialized = new SerializedObject(guardBundle.PatrolSystem);
-        SerializedProperty patrolPointsProperty = patrolSerialized.FindProperty("patrolPoints");
-        patrolPointsProperty.arraySize = patrolPoints.Length;
-        for (int i = 0; i < patrolPoints.Length; i++)
+        SerializedProperty searchSystemProperty = guardAiSerialized.FindProperty("searchSystem");
+        if (searchSystemProperty != null)
         {
-            patrolPointsProperty.GetArrayElementAtIndex(i).objectReferenceValue = patrolPoints[i];
-        }
-
-        if (guardBundle.Root != null && guardBundle.Root.name.Contains("Guard_B"))
-        {
-            SerializedProperty waypointIndexProperty = patrolSerialized.FindProperty("currentWaypointIndex");
-            if (waypointIndexProperty != null)
+            SearchSystem searchSystem = guardBundle.Root.GetComponent<SearchSystem>();
+            if (searchSystem == null)
             {
-                waypointIndexProperty.intValue = 2;
+                searchSystem = guardBundle.Root.AddComponent<SearchSystem>();
             }
+
+            searchSystemProperty.objectReferenceValue = searchSystem;
         }
 
-        patrolSerialized.ApplyModifiedPropertiesWithoutUndo();
+        guardAiSerialized.ApplyModifiedPropertiesWithoutUndo();
 
         SerializedObject visionSerialized = new SerializedObject(guardBundle.VisionSystem);
         visionSerialized.FindProperty("obstacleMask").intValue = 1 << environmentLayer;
@@ -551,13 +544,26 @@ public static class LevelBuilder
 
     private static void RemoveLegacyRoofObjects()
     {
-        string[] roofNames = { "Ceiling", "Roof", "Top", "Cover" };
-        for (int i = 0; i < roofNames.Length; i++)
+        string[] roofKeywords = { "ceiling", "roof", "top", "cover" };
+        Transform[] allTransforms = Object.FindObjectsByType<Transform>(FindObjectsSortMode.None);
+        for (int i = 0; i < allTransforms.Length; i++)
         {
-            GameObject roof = GameObject.Find(roofNames[i]);
-            if (roof != null)
+            Transform current = allTransforms[i];
+            if (current == null)
             {
-                Object.DestroyImmediate(roof);
+                continue;
+            }
+
+            string lowerName = current.name.ToLowerInvariant();
+            for (int j = 0; j < roofKeywords.Length; j++)
+            {
+                if (!lowerName.Contains(roofKeywords[j]))
+                {
+                    continue;
+                }
+
+                Object.DestroyImmediate(current.gameObject);
+                break;
             }
         }
     }
