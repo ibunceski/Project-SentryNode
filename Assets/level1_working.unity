@@ -684,6 +684,10 @@ MonoBehaviour:
     m_Bits: 512
   eyeOffset: {x: 0, y: 1.6, z: 0}
   playerTarget: {fileID: 2102705123}
+  proximityAwarenessRadius: 1.75
+  proximityRequiresLineOfSight: 1
+  proximitySuspicionFloor: 85
+  proximitySuspicionRatePerSecond: 80
 --- !u!114 &116071596
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -701,6 +705,7 @@ MonoBehaviour:
   hearingSystem: {fileID: 116071594}
   patrolSystem: {fileID: 116071593}
   searchSystem: {fileID: 116071591}
+  branchProviderBehaviours: []
   destinationEpsilon: 0.15
   lastActiveLeafNodeName: None
   currentGuardState: 0
@@ -940,7 +945,7 @@ MonoBehaviour:
   returnToPatrolClip: {fileID: 8300000, guid: f7ccbb10acf5e8e44a4096b1ea64fef5, type: 3}
   patrolFootstepsLoopClip: {fileID: 8300000, guid: d8999fc5752dec94d9cf4fa6c29b8f8d, type: 3}
   chasingFootstepsLoopClip: {fileID: 8300000, guid: 06458a08e2c57e8499637f1e083cb593, type: 3}
-  searchingLoopClip: {fileID: 8300000, guid: c2d5715baf6fd8b48a3c05c507743a88, type: 3}
+  searchingLoopClip: {fileID: 8300000, guid: 28c956ac5009fc54b9cc1542534fa6bd, type: 3}
   patrolLoopVolume: 0.2
   patrolLoopPitch: 0.95
   chaseLoopVolume: 0.65
@@ -3071,6 +3076,10 @@ MonoBehaviour:
     m_Bits: 512
   eyeOffset: {x: 0, y: 1.6, z: 0}
   playerTarget: {fileID: 2102705123}
+  proximityAwarenessRadius: 1.75
+  proximityRequiresLineOfSight: 1
+  proximitySuspicionFloor: 85
+  proximitySuspicionRatePerSecond: 80
 --- !u!114 &1093939232
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -3088,6 +3097,7 @@ MonoBehaviour:
   hearingSystem: {fileID: 1093939230}
   patrolSystem: {fileID: 1093939229}
   searchSystem: {fileID: 1093939227}
+  branchProviderBehaviours: []
   destinationEpsilon: 0.15
   lastActiveLeafNodeName: None
   currentGuardState: 0
@@ -3327,7 +3337,7 @@ MonoBehaviour:
   returnToPatrolClip: {fileID: 8300000, guid: f7ccbb10acf5e8e44a4096b1ea64fef5, type: 3}
   patrolFootstepsLoopClip: {fileID: 8300000, guid: d8999fc5752dec94d9cf4fa6c29b8f8d, type: 3}
   chasingFootstepsLoopClip: {fileID: 8300000, guid: 06458a08e2c57e8499637f1e083cb593, type: 3}
-  searchingLoopClip: {fileID: 8300000, guid: c2d5715baf6fd8b48a3c05c507743a88, type: 3}
+  searchingLoopClip: {fileID: 8300000, guid: 28c956ac5009fc54b9cc1542534fa6bd, type: 3}
   patrolLoopVolume: 0.2
   patrolLoopPitch: 0.95
   chaseLoopVolume: 0.65
