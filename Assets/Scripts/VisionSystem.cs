@@ -44,6 +44,20 @@ public class VisionSystem : MonoBehaviour
     [SerializeField]
     private Transform playerTarget;
 
+    [Header("Close-Range Awareness")]
+    [SerializeField]
+    private float proximityAwarenessRadius = 1.75f;
+
+    [SerializeField]
+    private bool proximityRequiresLineOfSight = true;
+
+    [SerializeField]
+    [Range(0f, 100f)]
+    private float proximitySuspicionFloor = 85f;
+
+    [SerializeField]
+    private float proximitySuspicionRatePerSecond = 80f;
+
     private float suspicion;
     private SuspicionLevel suspicionLevel;
     private bool hasVisualContact;
@@ -128,6 +142,11 @@ public class VisionSystem : MonoBehaviour
         }
 
         suspicion = Mathf.Clamp(suspicion + perception.SuspicionRatePerSecond * Time.deltaTime, 0f, 100f);
+        if (perception.HasProximityContact)
+        {
+            suspicion = Mathf.Max(suspicion, proximitySuspicionFloor);
+        }
+
         suspicionLevel = ResolveSuspicionLevel(suspicion);
 
         if (CanSeePlayer() && hasSuspicionFocus)
@@ -184,18 +203,19 @@ public class VisionSystem : MonoBehaviour
         bool inFov = angle < fieldOfViewAngle * 0.5f;
         bool inRange = distanceToPlayer <= viewDistance;
         bool inFovAndRange = inFov && inRange;
+        bool inProximityRange = distanceToPlayer <= Mathf.Max(0f, proximityAwarenessRadius);
 
         int obstacleOnlyMask = obstacleMask.value & ~playerMask.value;
         bool hasObstacleBetween = false;
         Vector3 rayEnd = playerCenter;
 
-        if (inFovAndRange)
+        if (inFovAndRange || inProximityRange)
         {
             bool hitObstacle = Physics.Raycast(
                 eyePos,
                 direction,
                 out RaycastHit hit,
-                viewDistance,
+                distanceToPlayer,
                 obstacleOnlyMask,
                 QueryTriggerInteraction.Ignore);
 
@@ -206,10 +226,16 @@ public class VisionSystem : MonoBehaviour
             }
         }
 
-        bool clearLineOfSight = inFovAndRange && (!hasObstacleBetween);
+        bool proximityContact = inProximityRange
+            && (!proximityRequiresLineOfSight || !hasObstacleBetween);
+        bool clearLineOfSight = (inFovAndRange && !hasObstacleBetween) || proximityContact;
         float suspicionRate;
 
-        if (clearLineOfSight && distanceToPlayer < 5f)
+        if (proximityContact)
+        {
+            suspicionRate = Mathf.Max(0f, proximitySuspicionRatePerSecond);
+        }
+        else if (clearLineOfSight && distanceToPlayer < 5f)
         {
             suspicionRate = 60f;
         }
@@ -230,8 +256,9 @@ public class VisionSystem : MonoBehaviour
         {
             HasClearLineOfSight = clearLineOfSight,
             VisiblePlayerTransform = clearLineOfSight ? playerTarget : null,
-            HasSuspicionFocus = inFovAndRange,
+            HasSuspicionFocus = inFovAndRange || proximityContact,
             SuspicionFocusPosition = playerTarget.position,
+            HasProximityContact = proximityContact,
             HasRaycastTarget = true,
             RaycastTargetPosition = rayEnd,
             EyePosition = eyePos,
@@ -338,6 +365,7 @@ public class VisionSystem : MonoBehaviour
             VisiblePlayerTransform = null;
             HasSuspicionFocus = false;
             SuspicionFocusPosition = Vector3.zero;
+            HasProximityContact = false;
             HasRaycastTarget = false;
             RaycastTargetPosition = Vector3.zero;
             EyePosition = Vector3.zero;
@@ -350,6 +378,7 @@ public class VisionSystem : MonoBehaviour
         public Transform VisiblePlayerTransform { get; set; }
         public bool HasSuspicionFocus { get; set; }
         public Vector3 SuspicionFocusPosition { get; set; }
+        public bool HasProximityContact { get; set; }
         public bool HasRaycastTarget { get; set; }
         public Vector3 RaycastTargetPosition { get; set; }
         public Vector3 EyePosition { get; set; }
