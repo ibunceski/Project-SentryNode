@@ -945,7 +945,7 @@ MonoBehaviour:
   returnToPatrolClip: {fileID: 8300000, guid: f7ccbb10acf5e8e44a4096b1ea64fef5, type: 3}
   patrolFootstepsLoopClip: {fileID: 8300000, guid: d8999fc5752dec94d9cf4fa6c29b8f8d, type: 3}
   chasingFootstepsLoopClip: {fileID: 8300000, guid: 06458a08e2c57e8499637f1e083cb593, type: 3}
-  searchingLoopClip: {fileID: 8300000, guid: 28c956ac5009fc54b9cc1542534fa6bd, type: 3}
+  searchingLoopClip: {fileID: 8300000, guid: 5c50bdd71f8eb59418d86694b1424acc, type: 3}
   patrolLoopVolume: 0.2
   patrolLoopPitch: 0.95
   chaseLoopVolume: 0.65
@@ -1128,8 +1128,7 @@ Material:
   m_Shader: {fileID: 46, guid: 0000000000000000f000000000000000, type: 0}
   m_Parent: {fileID: 0}
   m_ModifiedSerializedProperties: 0
-  m_ValidKeywords:
-  - _EMISSION
+  m_ValidKeywords: []
   m_InvalidKeywords: []
   m_LightmapFlags: 4
   m_EnableInstancingVariants: 0
@@ -3337,7 +3336,7 @@ MonoBehaviour:
   returnToPatrolClip: {fileID: 8300000, guid: f7ccbb10acf5e8e44a4096b1ea64fef5, type: 3}
   patrolFootstepsLoopClip: {fileID: 8300000, guid: d8999fc5752dec94d9cf4fa6c29b8f8d, type: 3}
   chasingFootstepsLoopClip: {fileID: 8300000, guid: 06458a08e2c57e8499637f1e083cb593, type: 3}
-  searchingLoopClip: {fileID: 8300000, guid: 28c956ac5009fc54b9cc1542534fa6bd, type: 3}
+  searchingLoopClip: {fileID: 8300000, guid: 277a81d0a3a582147a43f28654505cd5, type: 3}
   patrolLoopVolume: 0.2
   patrolLoopPitch: 0.95
   chaseLoopVolume: 0.65
@@ -3973,8 +3972,7 @@ Material:
   m_Shader: {fileID: 46, guid: 0000000000000000f000000000000000, type: 0}
   m_Parent: {fileID: 0}
   m_ModifiedSerializedProperties: 0
-  m_ValidKeywords:
-  - _EMISSION
+  m_ValidKeywords: []
   m_InvalidKeywords: []
   m_LightmapFlags: 4
   m_EnableInstancingVariants: 0
@@ -4824,8 +4822,7 @@ Material:
   m_Shader: {fileID: 46, guid: 0000000000000000f000000000000000, type: 0}
   m_Parent: {fileID: 0}
   m_ModifiedSerializedProperties: 0
-  m_ValidKeywords:
-  - _EMISSION
+  m_ValidKeywords: []
   m_InvalidKeywords: []
   m_LightmapFlags: 4
   m_EnableInstancingVariants: 0
