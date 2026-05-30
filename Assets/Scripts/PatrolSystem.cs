@@ -7,6 +7,13 @@ using UnityEngine.AI;
 /// </summary>
 public class PatrolSystem : MonoBehaviour
 {
+    [Header("Patrol Zone")]
+    [SerializeField]
+    private Transform patrolCenter;
+
+    [SerializeField]
+    private bool constrainToPatrolCenter = false;
+
     [SerializeField]
     private float minWanderRadius = 4f;
 
@@ -31,9 +38,17 @@ public class PatrolSystem : MonoBehaviour
     [SerializeField]
     private float navMeshSampleRange = 1.5f;
 
+    [SerializeField]
+    private float navMeshRecoverRange = 3f;
+
+    [SerializeField]
+    private float maxStallDuration = 1.2f;
+
     private bool hasWanderTarget;
     private Vector3 currentWanderTarget;
     private float waitEndTime = -1f;
+    private float lastProgressTime = -1f;
+    private Vector3 lastKnownPosition;
 
     /// <summary>
     /// Gets the current patrol target point in world space.
@@ -50,7 +65,12 @@ public class PatrolSystem : MonoBehaviour
     /// <returns>Always <see cref="NodeState.Running"/> because patrol is a continuous fallback behavior.</returns>
     public NodeState Patrol(NavMeshAgent agent)
     {
-        if (agent == null || !agent.enabled || !agent.isOnNavMesh)
+        if (agent == null || !agent.enabled)
+        {
+            return NodeState.Running;
+        }
+
+        if (!EnsureAgentOnNavMesh(agent))
         {
             return NodeState.Running;
         }
@@ -72,13 +92,25 @@ public class PatrolSystem : MonoBehaviour
             hasWanderTarget = TryPickRandomWanderTarget(agent, out currentWanderTarget);
             if (!hasWanderTarget)
             {
+                TryAssignFallbackDestination(agent);
                 agent.isStopped = false;
                 return NodeState.Running;
             }
         }
 
         agent.isStopped = false;
-        agent.SetDestination(currentWanderTarget);
+        if (!agent.SetDestination(currentWanderTarget))
+        {
+            ClearCurrentTarget();
+            return NodeState.Running;
+        }
+
+        if (IsStalled(agent))
+        {
+            agent.ResetPath();
+            ClearCurrentTarget();
+            return NodeState.Running;
+        }
 
         if (HasReachedWaypoint(agent, currentWanderTarget))
         {
@@ -96,6 +128,8 @@ public class PatrolSystem : MonoBehaviour
     {
         waitEndTime = -1f;
         ClearCurrentTarget();
+        lastProgressTime = -1f;
+        lastKnownPosition = transform.position;
     }
 
     private bool HasReachedWaypoint(NavMeshAgent agent, Vector3 waypoint)
@@ -136,11 +170,17 @@ public class PatrolSystem : MonoBehaviour
                 randomCircle = Vector2.right * radius;
             }
 
-            Vector3 candidate = transform.position + new Vector3(randomCircle.x, 0f, randomCircle.y);
+            Vector3 patrolOrigin = GetPatrolOrigin();
+            Vector3 candidate = patrolOrigin + new Vector3(randomCircle.x, 0f, randomCircle.y);
             if (NavMesh.SamplePosition(candidate, out NavMeshHit hit, sampleRange, NavMesh.AllAreas))
             {
                 float stepDistance = Vector3.Distance(transform.position, hit.position);
                 if (stepDistance < clampedMinStep)
+                {
+                    continue;
+                }
+
+                if (!CanReach(agent, hit.position))
                 {
                     continue;
                 }
@@ -160,16 +200,23 @@ public class PatrolSystem : MonoBehaviour
                 randomCircle = Vector2.right * radius;
             }
 
-            Vector3 candidate = transform.position + new Vector3(randomCircle.x, 0f, randomCircle.y);
+            Vector3 patrolOrigin = GetPatrolOrigin();
+            Vector3 candidate = patrolOrigin + new Vector3(randomCircle.x, 0f, randomCircle.y);
             if (NavMesh.SamplePosition(candidate, out NavMeshHit hit, sampleRange, NavMesh.AllAreas))
             {
+                if (!CanReach(agent, hit.position))
+                {
+                    continue;
+                }
+
                 target = hit.position;
                 return true;
             }
         }
 
         // Fallback sample near the guard so patrol can recover in sparse navmesh areas.
-        if (NavMesh.SamplePosition(transform.position, out NavMeshHit fallbackHit, Mathf.Max(1f, agent.radius * 2f), NavMesh.AllAreas))
+        if (NavMesh.SamplePosition(transform.position, out NavMeshHit fallbackHit, Mathf.Max(1f, agent.radius * 2f), NavMesh.AllAreas)
+            && CanReach(agent, fallbackHit.position))
         {
             target = fallbackHit.position;
             return true;
@@ -183,6 +230,102 @@ public class PatrolSystem : MonoBehaviour
         float minWait = Mathf.Max(0f, minWaitDuration);
         float maxWait = Mathf.Max(minWait, maxWaitDuration);
         return Random.Range(minWait, maxWait);
+    }
+
+    private bool EnsureAgentOnNavMesh(NavMeshAgent agent)
+    {
+        if (agent.isOnNavMesh)
+        {
+            return true;
+        }
+
+        float recoverRange = Mathf.Max(0.5f, navMeshRecoverRange);
+        if (!NavMesh.SamplePosition(transform.position, out NavMeshHit hit, recoverRange, NavMesh.AllAreas))
+        {
+            return false;
+        }
+
+        bool warped = agent.Warp(hit.position);
+        if (warped)
+        {
+            waitEndTime = -1f;
+            ClearCurrentTarget();
+            lastProgressTime = -1f;
+            lastKnownPosition = hit.position;
+        }
+
+        return warped;
+    }
+
+    private bool CanReach(NavMeshAgent agent, Vector3 destination)
+    {
+        NavMeshPath path = new NavMeshPath();
+        if (!agent.CalculatePath(destination, path))
+        {
+            return false;
+        }
+
+        return path.status == NavMeshPathStatus.PathComplete;
+    }
+
+    private Vector3 GetPatrolOrigin()
+    {
+        if (constrainToPatrolCenter && patrolCenter != null)
+        {
+            return patrolCenter.position;
+        }
+
+        return transform.position;
+    }
+
+    private bool IsStalled(NavMeshAgent agent)
+    {
+        if (agent.pathPending || !agent.hasPath)
+        {
+            lastKnownPosition = transform.position;
+            lastProgressTime = Time.time;
+            return false;
+        }
+
+        bool moved = Vector3.Distance(transform.position, lastKnownPosition) > 0.03f;
+        bool hasVelocity = agent.velocity.sqrMagnitude > 0.005f;
+        if (moved || hasVelocity)
+        {
+            lastKnownPosition = transform.position;
+            lastProgressTime = Time.time;
+            return false;
+        }
+
+        if (lastProgressTime < 0f)
+        {
+            lastProgressTime = Time.time;
+            lastKnownPosition = transform.position;
+            return false;
+        }
+
+        return Time.time - lastProgressTime > Mathf.Max(0.2f, maxStallDuration);
+    }
+
+    private void TryAssignFallbackDestination(NavMeshAgent agent)
+    {
+        for (int i = 0; i < 6; i++)
+        {
+            Vector2 circle = Random.insideUnitCircle * Mathf.Max(0.75f, minWanderRadius * 0.35f);
+            Vector3 candidate = transform.position + new Vector3(circle.x, 0f, circle.y);
+            if (!NavMesh.SamplePosition(candidate, out NavMeshHit hit, Mathf.Max(0.5f, navMeshSampleRange), NavMesh.AllAreas))
+            {
+                continue;
+            }
+
+            if (!CanReach(agent, hit.position))
+            {
+                continue;
+            }
+
+            currentWanderTarget = hit.position;
+            hasWanderTarget = true;
+            return;
+        }
     }
 
     private bool IsWaiting()
