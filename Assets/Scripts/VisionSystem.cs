@@ -170,7 +170,7 @@ public class VisionSystem : MonoBehaviour
     /// <returns><see langword="true"/> when suspicion is at least 80; otherwise <see langword="false"/>.</returns>
     public bool CanSeePlayer()
     {
-        return suspicion >= 80f;
+        return suspicion >= 80f && hasVisualContact;
     }
 
     /// <summary>

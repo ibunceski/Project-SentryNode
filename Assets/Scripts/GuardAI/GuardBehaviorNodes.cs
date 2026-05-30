@@ -53,7 +53,8 @@ public sealed class CanSeePlayerConditionNode : GuardConditionNode
 
     protected override NodeState EvaluateCondition()
     {
-        if (Context.Vision.Suspicion < 80f)
+        bool hasDirectVisualContact = Context.Vision.PlayerTransform != null;
+        if (Context.Vision.Suspicion < 80f || !hasDirectVisualContact)
         {
             return NodeState.Failure;
         }
@@ -139,16 +140,7 @@ public sealed class ChasePlayerActionNode : GuardActionNode
             hasLivePlayerPosition = true;
         }
 
-        if (!hasLivePlayerPosition && Context.PlayerLocator != null && Context.PlayerLocator.TryGetPlayerPosition(out playerPosition))
-        {
-            hasLivePlayerPosition = true;
-        }
-
-        if (!hasLivePlayerPosition && Context.TryGetPlayerPosition(out Vector3 trackedPlayerPosition))
-        {
-            playerPosition = trackedPlayerPosition;
-        }
-        else if (!hasLivePlayerPosition)
+        if (!hasLivePlayerPosition)
         {
             if (Context.Vision.HasLastKnownPosition)
             {

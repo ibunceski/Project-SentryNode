@@ -31,6 +31,17 @@ public static class LevelBuilder
     [MenuItem("Tools/Build Demo Level")]
     public static void BuildDemoLevel()
     {
+        if (EditorApplication.isPlaying || EditorApplication.isPlayingOrWillChangePlaymode)
+        {
+            Debug.LogWarning("Build Demo Level is disabled during Play Mode. Exit Play Mode and run it again.");
+            return;
+        }
+
+        PlayerSoundConfig playerSoundConfig = CapturePlayerSoundConfig();
+        GuardSoundConfig guardSoundConfig = CaptureGuardSoundConfig();
+        playerSoundConfig = FillMissingPlayerClips(playerSoundConfig);
+        guardSoundConfig = FillMissingGuardClips(guardSoundConfig);
+
         int environmentLayer = EnsureLayer(EnvironmentLayerName);
         int playerLayer = EnsureLayer(PlayerLayerName);
         EnsureTag(GroundTagName);
@@ -53,31 +64,30 @@ public static class LevelBuilder
 
         GameObject root = new GameObject(RootName);
 
-        CreateFloor(root.transform, environmentLayer);
-        CreateOuterWalls(root.transform, environmentLayer);
-        CreateInteriorDividers(root.transform, environmentLayer);
-        CreateRandomObstacles(root.transform, environmentLayer);
+        LayoutResult layout = BuildIndoorLayout(root.transform, environmentLayer);
         CreateLighting(root.transform);
         UnityEditor.AI.NavMeshBuilder.BuildNavMesh();
 
         GuardBundle guardPrimary = CreateGuardVariant(
             root.transform,
             "Guard_A",
-            new Vector3(-10f, 0f, -10f),
+            layout.LobbyGuardSpawn,
             environmentLayer,
             false);
         GuardBundle guardVariant = CreateGuardVariant(
             root.transform,
             "Guard_B",
-            new Vector3(10f, 0f, 10f),
+            layout.SecurityGuardSpawn,
             environmentLayer,
             true);
 
-        GameObject player = CreatePlayer(root.transform, playerLayer);
-        _ = CreatePatrolPoints(root.transform, environmentLayer);
+        GameObject player = CreatePlayer(root.transform, playerLayer, layout.PlayerSpawn);
 
-        ConfigureGuardSystems(guardPrimary, player.transform, playerLayer, environmentLayer);
-        ConfigureGuardSystems(guardVariant, player.transform, playerLayer, environmentLayer);
+        ConfigureGuardSystems(guardPrimary, player.transform, playerLayer, environmentLayer, layout.LobbyPatrolZone);
+        ConfigureGuardSystems(guardVariant, player.transform, playerLayer, environmentLayer, layout.SecurityPatrolZone);
+        ApplyPlayerSoundConfig(player.GetComponent<PlayerController>(), playerSoundConfig);
+        ApplyGuardSoundConfig(guardPrimary.GuardSoundSystem, guardSoundConfig);
+        ApplyGuardSoundConfig(guardVariant.GuardSoundSystem, guardSoundConfig);
 
         ApplyNamedSceneMaterials(root);
         EnsureAllRenderersHaveExplicitMaterial();
@@ -91,99 +101,312 @@ public static class LevelBuilder
         GameObject floor = CreateCube(
             "Floor",
             new Vector3(0f, -0.05f, 0f),
-            new Vector3(30f, 0.1f, 30f),
+            new Vector3(52f, 0.1f, 42f),
             parent,
             environmentLayer);
         floor.tag = GroundTagName;
     }
 
-    private static void CreateOuterWalls(Transform parent, int environmentLayer)
+    private static LayoutResult BuildIndoorLayout(Transform parent, int environmentLayer)
     {
-        const float halfSize = 15f;
-        const float wallHeight = 3f;
-        const float wallThickness = 1f;
+        CreateFloor(parent, environmentLayer);
+        CreatePerimeter(parent, environmentLayer, 50f, 40f);
 
-        CreateCube(
-            "Wall_North",
-            new Vector3(0f, wallHeight * 0.5f, halfSize + wallThickness * 0.5f),
-            new Vector3(30f + wallThickness, wallHeight, wallThickness),
-            parent,
-            environmentLayer);
-
-        CreateCube(
-            "Wall_South",
-            new Vector3(0f, wallHeight * 0.5f, -halfSize - wallThickness * 0.5f),
-            new Vector3(30f + wallThickness, wallHeight, wallThickness),
-            parent,
-            environmentLayer);
-
-        CreateCube(
-            "Wall_East",
-            new Vector3(halfSize + wallThickness * 0.5f, wallHeight * 0.5f, 0f),
-            new Vector3(wallThickness, wallHeight, 30f + wallThickness),
-            parent,
-            environmentLayer);
-
-        CreateCube(
-            "Wall_West",
-            new Vector3(-halfSize - wallThickness * 0.5f, wallHeight * 0.5f, 0f),
-            new Vector3(wallThickness, wallHeight, 30f + wallThickness),
-            parent,
-            environmentLayer);
-    }
-
-    private static void CreateInteriorDividers(Transform parent, int environmentLayer)
-    {
-        CreateCube(
-            "Divider_A",
-            new Vector3(-5f, 1.5f, 0f),
-            new Vector3(0.5f, 3f, 18f),
-            parent,
-            environmentLayer);
-
-        CreateCube(
-            "Divider_B",
-            new Vector3(5f, 1.5f, 4f),
-            new Vector3(0.5f, 3f, 16f),
-            parent,
-            environmentLayer);
-
-        CreateCube(
-            "Divider_C",
-            new Vector3(0f, 1.5f, -6f),
-            new Vector3(14f, 3f, 0.5f),
-            parent,
-            environmentLayer);
-    }
-
-    private static void CreateRandomObstacles(Transform parent, int environmentLayer)
-    {
-        Random.InitState(42);
-        Vector3[] reservedPositions =
-        {
-            new Vector3(-10f, 0f, -10f),
-            new Vector3(10f, 0f, 10f),
+        RoomSpec lobby = new RoomSpec(
+            "Room_Lobby",
+            new Vector3(0f, 0f, -14f),
+            new Vector2(14f, 10f),
+            new[] { new DoorwaySpec(WallSide.North, 3.4f, 0f) });
+        RoomSpec operations = new RoomSpec(
+            "Room_Operations",
             new Vector3(0f, 0f, 0f),
-            new Vector3(-12f, 0f, -12f),
-            new Vector3(12f, 0f, -12f),
-            new Vector3(12f, 0f, 12f),
-            new Vector3(-12f, 0f, 12f)
-        };
+            new Vector2(12f, 10f),
+            new[]
+            {
+                new DoorwaySpec(WallSide.South, 3.4f, 0f),
+                new DoorwaySpec(WallSide.North, 3.4f, 0f),
+                new DoorwaySpec(WallSide.West, 3.2f, 0f),
+                new DoorwaySpec(WallSide.East, 3.2f, 0f)
+            });
+        RoomSpec security = new RoomSpec(
+            "Room_Security",
+            new Vector3(15f, 0f, 0f),
+            new Vector2(10f, 9f),
+            new[] { new DoorwaySpec(WallSide.West, 3.2f, 0f) });
+        RoomSpec storage = new RoomSpec(
+            "Room_Storage",
+            new Vector3(-15f, 0f, 0f),
+            new Vector2(10f, 9f),
+            new[] { new DoorwaySpec(WallSide.East, 3.2f, 0f) });
+        RoomSpec restricted = new RoomSpec(
+            "Room_Restricted",
+            new Vector3(0f, 0f, 14f),
+            new Vector2(12f, 9f),
+            new[] { new DoorwaySpec(WallSide.South, 3.2f, 0f) });
 
-        for (int i = 0; i < 4; i++)
+        ILayoutElement[] layoutElements =
         {
-            float width = Random.Range(1.2f, 3f);
-            float depth = Random.Range(1.2f, 3f);
-            float height = Random.Range(1.2f, 2.8f);
-            Vector3 position = FindObstaclePosition(reservedPositions, 3.5f);
-
-            CreateCube(
-                "Obstacle_" + (i + 1),
-                new Vector3(position.x, height * 0.5f, position.z),
-                new Vector3(width, height, depth),
-                parent,
-                environmentLayer);
+            new RoomLayoutElement(lobby),
+            new RoomLayoutElement(operations),
+            new RoomLayoutElement(security),
+            new RoomLayoutElement(storage),
+            new RoomLayoutElement(restricted),
+            new CorridorLayoutElement(new CorridorSpec("Corridor_LobbyToOperations", new Vector3(0f, 0f, -7f), 4f, 4f, false)),
+            new CorridorLayoutElement(new CorridorSpec("Corridor_OperationsToSecurity", new Vector3(8f, 0f, 0f), 4f, 3.6f, true)),
+            new CorridorLayoutElement(new CorridorSpec("Corridor_OperationsToStorage", new Vector3(-8f, 0f, 0f), 4f, 3.6f, true)),
+            new CorridorLayoutElement(new CorridorSpec("Corridor_OperationsToRestricted", new Vector3(0f, 0f, 7.25f), 4.5f, 3.6f, false))
+        };
+        for (int i = 0; i < layoutElements.Length; i++)
+        {
+            layoutElements[i].Build(parent, environmentLayer);
         }
+
+        // Lobby cover and sight breakers.
+        CreateCoverObject("LobbyCover_LeftBench", new Vector3(-3.6f, 0.5f, -16.5f), new Vector3(2.8f, 1f, 0.8f), parent, environmentLayer);
+        CreateCoverObject("LobbyCover_RightBench", new Vector3(3.6f, 0.5f, -16.5f), new Vector3(2.8f, 1f, 0.8f), parent, environmentLayer);
+        CreateCoverObject("LobbyCover_Pillar", new Vector3(0f, 1.05f, -12.2f), new Vector3(1f, 2.1f, 1f), parent, environmentLayer);
+        CreateCoverObject("LobbyCover_CenterDesk", new Vector3(4.2f, 0.6f, -14.6f), new Vector3(1.8f, 1.2f, 1f), parent, environmentLayer);
+
+        // Operations room corners and LOS blockers.
+        CreateCoverObject("OperationsCover_NW", new Vector3(-4.2f, 0.75f, 2.8f), new Vector3(1.6f, 1.5f, 1.6f), parent, environmentLayer);
+        CreateCoverObject("OperationsCover_NE", new Vector3(4.2f, 0.75f, 2.8f), new Vector3(1.6f, 1.5f, 1.6f), parent, environmentLayer);
+        CreateCoverObject("OperationsCover_SW", new Vector3(-3.8f, 0.75f, -2.4f), new Vector3(1.5f, 1.5f, 1.3f), parent, environmentLayer);
+        CreateCoverObject("OperationsCover_Mid", new Vector3(3.2f, 0.6f, -1.8f), new Vector3(1.8f, 1.2f, 1f), parent, environmentLayer);
+        CreateCoverObject("CorridorJunctionCover", new Vector3(-2.4f, 0.7f, 5.4f), new Vector3(1.2f, 1.4f, 1f), parent, environmentLayer);
+
+        // Security room props.
+        CreateCoverObject("SecurityConsole", new Vector3(17.3f, 0.6f, 2.8f), new Vector3(1.8f, 1.2f, 0.8f), parent, environmentLayer);
+        CreateCoverObject("SecurityLocker", new Vector3(18.6f, 1f, -2.8f), new Vector3(0.75f, 2f, 1.1f), parent, environmentLayer);
+        CreateCoverObject("SecurityDesk", new Vector3(13.1f, 0.6f, -0.6f), new Vector3(1.5f, 1.2f, 1f), parent, environmentLayer);
+        CreateCoverObject("SecurityPartition", new Vector3(17.6f, 0.8f, 0.8f), new Vector3(1f, 1.6f, 0.6f), parent, environmentLayer);
+
+        // Storage room crates and shelves.
+        CreateCoverObject("StorageShelf_West", new Vector3(-18.5f, 1.1f, 0f), new Vector3(0.55f, 2.2f, 5.6f), parent, environmentLayer);
+        CreateCoverObject("StorageShelf_East", new Vector3(-11.5f, 1.1f, 0f), new Vector3(0.55f, 2.2f, 5.6f), parent, environmentLayer);
+        CreateCoverObject("StorageCrate_A", new Vector3(-17.1f, 0.6f, -3.1f), new Vector3(1f, 1.2f, 1f), parent, environmentLayer);
+        CreateCoverObject("StorageCrate_B", new Vector3(-16.9f, 0.55f, 1.6f), new Vector3(0.9f, 1.1f, 0.9f), parent, environmentLayer);
+        CreateCoverObject("StorageCrate_C", new Vector3(-12.9f, 0.55f, 2.8f), new Vector3(0.95f, 1.1f, 0.95f), parent, environmentLayer);
+
+        // Restricted room barriers.
+        CreateCoverObject("RestrictedBarrier_Left", new Vector3(-3f, 0.9f, 14.3f), new Vector3(2f, 1.8f, 1.2f), parent, environmentLayer);
+        CreateCoverObject("RestrictedBarrier_Right", new Vector3(3f, 0.9f, 14.3f), new Vector3(2f, 1.8f, 1.2f), parent, environmentLayer);
+        CreateCoverObject("RestrictedCore", new Vector3(3.1f, 1.1f, 16.6f), new Vector3(1.6f, 2.2f, 1.2f), parent, environmentLayer);
+        CreateCoverObject("RestrictedSideCover", new Vector3(-4.8f, 0.7f, 12.1f), new Vector3(1.2f, 1.4f, 0.9f), parent, environmentLayer);
+
+        PatrolZoneConfig lobbyPatrolZone = CreatePatrolZone(
+            parent,
+            "PatrolZone_Lobby",
+            new Vector3(0f, 0f, -14f),
+            new Vector2(12f, 8f),
+            environmentLayer);
+        PatrolZoneConfig securityPatrolZone = CreatePatrolZone(
+            parent,
+            "PatrolZone_Security",
+            new Vector3(15f, 0f, 0f),
+            new Vector2(7f, 6f),
+            environmentLayer);
+        _ = CreatePatrolZone(
+            parent,
+            "PatrolZone_Restricted",
+            new Vector3(0f, 0f, 14f),
+            new Vector2(9f, 7f),
+            environmentLayer);
+
+        return new LayoutResult
+        {
+            PlayerSpawn = new Vector3(0f, 0f, -17.2f),
+            LobbyGuardSpawn = new Vector3(-3.2f, 0f, -12.8f),
+            SecurityGuardSpawn = new Vector3(16f, 0f, 0.8f),
+            LobbyPatrolZone = lobbyPatrolZone,
+            SecurityPatrolZone = securityPatrolZone
+        };
+    }
+
+    private static void CreatePerimeter(Transform parent, int environmentLayer, float width, float depth)
+    {
+        float halfWidth = width * 0.5f;
+        float halfDepth = depth * 0.5f;
+        float halfWallHeight = 1.5f;
+        float wallThickness = 1f;
+
+        CreateWall("Wall_Outer_North", new Vector3(0f, halfWallHeight, halfDepth), new Vector3(width, 3f, wallThickness), parent, environmentLayer);
+        CreateWall("Wall_Outer_South", new Vector3(0f, halfWallHeight, -halfDepth), new Vector3(width, 3f, wallThickness), parent, environmentLayer);
+        CreateWall("Wall_Outer_East", new Vector3(halfWidth, halfWallHeight, 0f), new Vector3(wallThickness, 3f, depth), parent, environmentLayer);
+        CreateWall("Wall_Outer_West", new Vector3(-halfWidth, halfWallHeight, 0f), new Vector3(wallThickness, 3f, depth), parent, environmentLayer);
+    }
+
+    private static void CreateRoom(Transform parent, RoomSpec room, int environmentLayer)
+    {
+        GameObject roomRoot = new GameObject(room.Name);
+        roomRoot.transform.SetParent(parent);
+        roomRoot.transform.position = Vector3.zero;
+
+        float halfWidth = room.Size.x * 0.5f;
+        float halfDepth = room.Size.y * 0.5f;
+        float halfWallHeight = 1.5f;
+        float wallThickness = 0.9f;
+        const float wallHeight = 3f;
+
+        CreateWallWithDoorway(roomRoot.transform, room.Name + "_Wall_North", room.Center + new Vector3(0f, halfWallHeight, halfDepth), room.Size.x, wallHeight, wallThickness, true, FindDoorway(room, WallSide.North), environmentLayer);
+        CreateWallWithDoorway(roomRoot.transform, room.Name + "_Wall_South", room.Center + new Vector3(0f, halfWallHeight, -halfDepth), room.Size.x, wallHeight, wallThickness, true, FindDoorway(room, WallSide.South), environmentLayer);
+        CreateWallWithDoorway(roomRoot.transform, room.Name + "_Wall_East", room.Center + new Vector3(halfWidth, halfWallHeight, 0f), room.Size.y, wallHeight, wallThickness, false, FindDoorway(room, WallSide.East), environmentLayer);
+        CreateWallWithDoorway(roomRoot.transform, room.Name + "_Wall_West", room.Center + new Vector3(-halfWidth, halfWallHeight, 0f), room.Size.y, wallHeight, wallThickness, false, FindDoorway(room, WallSide.West), environmentLayer);
+    }
+
+    private static void CreateCorridor(Transform parent, CorridorSpec corridor, int environmentLayer)
+    {
+        GameObject corridorRoot = new GameObject(corridor.Name);
+        corridorRoot.transform.SetParent(parent);
+        corridorRoot.transform.position = Vector3.zero;
+
+        const float wallHeight = 3f;
+        const float wallThickness = 0.8f;
+        float halfWallHeight = wallHeight * 0.5f;
+        float halfWidth = corridor.Width * 0.5f;
+
+        if (corridor.IsHorizontal)
+        {
+            CreateWall(
+                corridor.Name + "_NorthWall",
+                new Vector3(corridor.Center.x, halfWallHeight, corridor.Center.z + halfWidth),
+                new Vector3(corridor.Length, wallHeight, wallThickness),
+                corridorRoot.transform,
+                environmentLayer);
+            CreateWall(
+                corridor.Name + "_SouthWall",
+                new Vector3(corridor.Center.x, halfWallHeight, corridor.Center.z - halfWidth),
+                new Vector3(corridor.Length, wallHeight, wallThickness),
+                corridorRoot.transform,
+                environmentLayer);
+            return;
+        }
+
+        CreateWall(
+            corridor.Name + "_EastWall",
+            new Vector3(corridor.Center.x + halfWidth, halfWallHeight, corridor.Center.z),
+            new Vector3(wallThickness, wallHeight, corridor.Length),
+            corridorRoot.transform,
+            environmentLayer);
+        CreateWall(
+            corridor.Name + "_WestWall",
+            new Vector3(corridor.Center.x - halfWidth, halfWallHeight, corridor.Center.z),
+            new Vector3(wallThickness, wallHeight, corridor.Length),
+            corridorRoot.transform,
+            environmentLayer);
+    }
+
+    private static void CreateWallWithDoorway(
+        Transform parent,
+        string wallName,
+        Vector3 center,
+        float wallLength,
+        float wallHeight,
+        float wallThickness,
+        bool horizontal,
+        DoorwaySpec? doorway,
+        int environmentLayer)
+    {
+        if (!doorway.HasValue)
+        {
+            Vector3 wallSize = horizontal
+                ? new Vector3(wallLength, wallHeight, wallThickness)
+                : new Vector3(wallThickness, wallHeight, wallLength);
+            CreateWall(wallName, center, wallSize, parent, environmentLayer);
+            return;
+        }
+
+        DoorwaySpec doorwayValue = doorway.Value;
+        float openingWidth = Mathf.Clamp(doorwayValue.Width, 0.5f, wallLength - 0.5f);
+        float clearLength = Mathf.Max(0.1f, wallLength - openingWidth);
+        float halfSegmentLength = clearLength * 0.5f;
+        float maxCenterOffset = clearLength * 0.5f;
+        float centerOffset = Mathf.Clamp(doorwayValue.Offset, -maxCenterOffset, maxCenterOffset);
+        float gapOffset = openingWidth * 0.5f;
+
+        CreateDoorway(
+            parent,
+            wallName,
+            center,
+            halfSegmentLength,
+            wallHeight,
+            wallThickness,
+            horizontal,
+            centerOffset,
+            gapOffset,
+            environmentLayer);
+    }
+
+    private static void CreateDoorway(
+        Transform parent,
+        string wallName,
+        Vector3 wallCenter,
+        float segmentLength,
+        float wallHeight,
+        float wallThickness,
+        bool horizontal,
+        float centerOffset,
+        float gapOffset,
+        int environmentLayer)
+    {
+        Vector3 axis = horizontal ? Vector3.right : Vector3.forward;
+        Vector3 segmentOffset = axis * (gapOffset + segmentLength * 0.5f);
+        Vector3 centeredWall = wallCenter + axis * centerOffset;
+        Vector3 wallSize = horizontal
+            ? new Vector3(segmentLength, wallHeight, wallThickness)
+            : new Vector3(wallThickness, wallHeight, segmentLength);
+
+        CreateWall(wallName + "_A", centeredWall - segmentOffset, wallSize, parent, environmentLayer);
+        CreateWall(wallName + "_B", centeredWall + segmentOffset, wallSize, parent, environmentLayer);
+    }
+
+    private static GameObject CreateWall(string name, Vector3 center, Vector3 size, Transform parent, int environmentLayer)
+    {
+        return CreateCube(name, center, size, parent, environmentLayer);
+    }
+
+    private static void CreateCoverObject(string name, Vector3 center, Vector3 size, Transform parent, int environmentLayer)
+    {
+        CreateCube(name, center, size, parent, environmentLayer);
+    }
+
+    private static PatrolZoneConfig CreatePatrolZone(
+        Transform parent,
+        string name,
+        Vector3 center,
+        Vector2 size,
+        int environmentLayer)
+    {
+        GameObject zoneRoot = new GameObject(name);
+        zoneRoot.transform.SetParent(parent);
+        zoneRoot.transform.position = center;
+        zoneRoot.layer = environmentLayer;
+
+        return new PatrolZoneConfig
+        {
+            Name = name,
+            Root = zoneRoot.transform,
+            MinRadius = Mathf.Max(1.5f, Mathf.Min(size.x, size.y) * 0.3f),
+            MaxRadius = Mathf.Max(3.25f, Mathf.Min(size.x, size.y) * 0.65f),
+            MinStepDistance = Mathf.Max(1f, Mathf.Min(size.x, size.y) * 0.2f)
+        };
+    }
+
+    private static DoorwaySpec? FindDoorway(RoomSpec room, WallSide side)
+    {
+        if (room.Doorways == null)
+        {
+            return null;
+        }
+
+        for (int i = 0; i < room.Doorways.Length; i++)
+        {
+            if (room.Doorways[i].Side == side)
+            {
+                return room.Doorways[i];
+            }
+        }
+
+        return null;
     }
 
     private static void CreateLighting(Transform parent)
@@ -224,7 +447,7 @@ public static class LevelBuilder
     {
         GameObject guard = new GameObject(guardName);
         guard.transform.SetParent(parent);
-        guard.transform.position = position;
+        guard.transform.position = SnapToNavMesh(position, 3f);
         guard.transform.rotation = Quaternion.identity;
 
         if (isVariant)
@@ -266,13 +489,18 @@ public static class LevelBuilder
 
         NavMeshAgent agent = guard.AddComponent<NavMeshAgent>();
         agent.speed = 3.5f;
+        agent.radius = 0.35f;
+        agent.height = 1.9f;
+        agent.baseOffset = 0f;
         agent.stoppingDistance = 0.3f;
         agent.angularSpeed = 360f;
+        agent.autoBraking = false;
 
         GuardAI guardAI = guard.AddComponent<GuardAI>();
         VisionSystem visionSystem = guard.AddComponent<VisionSystem>();
         HearingSystem hearingSystem = guard.AddComponent<HearingSystem>();
         PatrolSystem patrolSystem = guard.AddComponent<PatrolSystem>();
+        GuardSoundSystem guardSoundSystem = guard.AddComponent<GuardSoundSystem>();
         guard.AddComponent<GuardDebugVisualizer>();
 
         return new GuardBundle
@@ -282,15 +510,16 @@ public static class LevelBuilder
             GuardAI = guardAI,
             VisionSystem = visionSystem,
             HearingSystem = hearingSystem,
-            PatrolSystem = patrolSystem
+            PatrolSystem = patrolSystem,
+            GuardSoundSystem = guardSoundSystem
         };
     }
 
-    private static GameObject CreatePlayer(Transform parent, int playerLayer)
+    private static GameObject CreatePlayer(Transform parent, int playerLayer, Vector3 spawnPosition)
     {
         GameObject player = new GameObject("Player");
         player.transform.SetParent(parent);
-        player.transform.position = new Vector3(0f, 0f, 0f);
+        player.transform.position = spawnPosition;
         player.transform.rotation = Quaternion.identity;
         SetLayerRecursively(player, playerLayer);
 
@@ -323,43 +552,12 @@ public static class LevelBuilder
         return player;
     }
 
-    private static Transform[] CreatePatrolPoints(Transform parent, int environmentLayer)
-    {
-        Vector3[] points =
-        {
-            new Vector3(-12f, 0f, -12f),
-            new Vector3(12f, 0f, -12f),
-            new Vector3(12f, 0f, 12f),
-            new Vector3(-12f, 0f, 12f)
-        };
-
-        Transform[] patrolPoints = new Transform[points.Length];
-        for (int i = 0; i < points.Length; i++)
-        {
-            GameObject point = new GameObject("PatrolPoint_" + (i + 1));
-            point.transform.SetParent(parent);
-            point.transform.position = points[i];
-            point.layer = environmentLayer;
-
-            GameObject marker = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-            marker.name = "Marker";
-            marker.transform.SetParent(point.transform);
-            marker.transform.localPosition = new Vector3(0f, 0.05f, 0f);
-            marker.transform.localScale = new Vector3(0.4f, 0.05f, 0.4f);
-            RemoveCollider(marker);
-            SetLayerRecursively(marker, environmentLayer);
-
-            patrolPoints[i] = point.transform;
-        }
-
-        return patrolPoints;
-    }
-
     private static void ConfigureGuardSystems(
         GuardBundle guardBundle,
         Transform playerTarget,
         int playerLayer,
-        int environmentLayer)
+        int environmentLayer,
+        PatrolZoneConfig patrolZoneConfig)
     {
         SerializedObject guardAiSerialized = new SerializedObject(guardBundle.GuardAI);
         guardAiSerialized.FindProperty("navMeshAgent").objectReferenceValue = guardBundle.Agent;
@@ -385,6 +583,265 @@ public static class LevelBuilder
         visionSerialized.FindProperty("playerMask").intValue = 1 << playerLayer;
         visionSerialized.FindProperty("playerTarget").objectReferenceValue = playerTarget;
         visionSerialized.ApplyModifiedPropertiesWithoutUndo();
+
+        ApplyPatrolZoneConfig(guardBundle.PatrolSystem, patrolZoneConfig);
+    }
+
+    private static void ApplyPatrolZoneConfig(PatrolSystem patrolSystem, PatrolZoneConfig patrolZoneConfig)
+    {
+        if (patrolSystem == null)
+        {
+            return;
+        }
+
+        SerializedObject patrolSerialized = new SerializedObject(patrolSystem);
+        SerializedProperty patrolCenterProperty = patrolSerialized.FindProperty("patrolCenter");
+        if (patrolCenterProperty != null)
+        {
+            patrolCenterProperty.objectReferenceValue = patrolZoneConfig.Root;
+        }
+
+        SerializedProperty constrainToCenterProperty = patrolSerialized.FindProperty("constrainToPatrolCenter");
+        if (constrainToCenterProperty != null)
+        {
+            constrainToCenterProperty.boolValue = patrolZoneConfig.Root != null;
+        }
+
+        patrolSerialized.FindProperty("minWanderRadius").floatValue = patrolZoneConfig.MinRadius;
+        patrolSerialized.FindProperty("maxWanderRadius").floatValue = patrolZoneConfig.MaxRadius;
+        patrolSerialized.FindProperty("minStepDistance").floatValue = Mathf.Min(patrolZoneConfig.MinStepDistance, patrolZoneConfig.MaxRadius * 0.75f);
+        patrolSerialized.FindProperty("waypointTolerance").floatValue = 0.45f;
+        patrolSerialized.FindProperty("minWaitDuration").floatValue = 0.1f;
+        patrolSerialized.FindProperty("maxWaitDuration").floatValue = 0.35f;
+        patrolSerialized.FindProperty("maxSampleAttempts").intValue = 24;
+        patrolSerialized.FindProperty("navMeshSampleRange").floatValue = 3f;
+        SerializedProperty navRecoverRangeProperty = patrolSerialized.FindProperty("navMeshRecoverRange");
+        if (navRecoverRangeProperty != null)
+        {
+            navRecoverRangeProperty.floatValue = 4f;
+        }
+
+        SerializedProperty maxStallDurationProperty = patrolSerialized.FindProperty("maxStallDuration");
+        if (maxStallDurationProperty != null)
+        {
+            maxStallDurationProperty.floatValue = 1f;
+        }
+
+        patrolSerialized.ApplyModifiedPropertiesWithoutUndo();
+    }
+
+    private static Vector3 SnapToNavMesh(Vector3 desiredPosition, float sampleRange)
+    {
+        if (NavMesh.SamplePosition(desiredPosition, out NavMeshHit hit, Mathf.Max(0.5f, sampleRange), NavMesh.AllAreas))
+        {
+            return hit.position;
+        }
+
+        return desiredPosition;
+    }
+
+    private static PlayerSoundConfig CapturePlayerSoundConfig()
+    {
+        PlayerController existingPlayerController = Object.FindFirstObjectByType<PlayerController>();
+        if (existingPlayerController == null)
+        {
+            return PlayerSoundConfig.Default;
+        }
+
+        SerializedObject serializedPlayer = new SerializedObject(existingPlayerController);
+        return new PlayerSoundConfig
+        {
+            IsValid = true,
+            WalkFootstepClip = serializedPlayer.FindProperty("walkFootstepClip").objectReferenceValue as AudioClip,
+            SprintFootstepClip = serializedPlayer.FindProperty("sprintFootstepClip").objectReferenceValue as AudioClip,
+            CrouchFootstepClip = serializedPlayer.FindProperty("crouchFootstepClip").objectReferenceValue as AudioClip,
+            WalkFootstepInterval = serializedPlayer.FindProperty("walkFootstepInterval").floatValue,
+            SprintFootstepInterval = serializedPlayer.FindProperty("sprintFootstepInterval").floatValue,
+            CrouchFootstepInterval = serializedPlayer.FindProperty("crouchFootstepInterval").floatValue,
+            WalkFootstepVolume = serializedPlayer.FindProperty("walkFootstepVolume").floatValue,
+            SprintFootstepVolume = serializedPlayer.FindProperty("sprintFootstepVolume").floatValue,
+            CrouchFootstepVolume = serializedPlayer.FindProperty("crouchFootstepVolume").floatValue,
+            WalkNoiseRadius = serializedPlayer.FindProperty("walkNoiseRadius").floatValue,
+            SprintNoiseRadius = serializedPlayer.FindProperty("sprintNoiseRadius").floatValue,
+            CrouchNoiseRadius = serializedPlayer.FindProperty("crouchNoiseRadius").floatValue,
+            MoveInputThreshold = serializedPlayer.FindProperty("moveInputThreshold").floatValue
+        };
+    }
+
+    private static GuardSoundConfig CaptureGuardSoundConfig()
+    {
+        GuardSoundSystem[] existingGuardSounds = Object.FindObjectsByType<GuardSoundSystem>(FindObjectsSortMode.None);
+        if (existingGuardSounds == null || existingGuardSounds.Length == 0)
+        {
+            return GuardSoundConfig.Default;
+        }
+
+        GuardSoundSystem source = existingGuardSounds[0];
+        for (int i = 0; i < existingGuardSounds.Length; i++)
+        {
+            GuardSoundSystem candidate = existingGuardSounds[i];
+            if (candidate != null && candidate.gameObject.name == "Guard_A")
+            {
+                source = candidate;
+                break;
+            }
+        }
+
+        SerializedObject serializedGuardSound = new SerializedObject(source);
+        return new GuardSoundConfig
+        {
+            IsValid = true,
+            SuspiciousEnterClip = serializedGuardSound.FindProperty("suspiciousEnterClip").objectReferenceValue as AudioClip,
+            ChaseEnterClip = serializedGuardSound.FindProperty("chaseEnterClip").objectReferenceValue as AudioClip,
+            InvestigatingEnterClip = serializedGuardSound.FindProperty("investigatingEnterClip").objectReferenceValue as AudioClip,
+            ReturnToPatrolClip = serializedGuardSound.FindProperty("returnToPatrolClip").objectReferenceValue as AudioClip,
+            PatrolFootstepsLoopClip = serializedGuardSound.FindProperty("patrolFootstepsLoopClip").objectReferenceValue as AudioClip,
+            ChasingFootstepsLoopClip = serializedGuardSound.FindProperty("chasingFootstepsLoopClip").objectReferenceValue as AudioClip,
+            SearchingLoopClip = serializedGuardSound.FindProperty("searchingLoopClip").objectReferenceValue as AudioClip,
+            PatrolLoopVolume = serializedGuardSound.FindProperty("patrolLoopVolume").floatValue,
+            PatrolLoopPitch = serializedGuardSound.FindProperty("patrolLoopPitch").floatValue,
+            ChaseLoopVolume = serializedGuardSound.FindProperty("chaseLoopVolume").floatValue,
+            ChaseLoopPitch = serializedGuardSound.FindProperty("chaseLoopPitch").floatValue,
+            SearchingLoopVolume = serializedGuardSound.FindProperty("searchingLoopVolume").floatValue,
+            SearchingLoopPitch = serializedGuardSound.FindProperty("searchingLoopPitch").floatValue,
+            MovingSpeedThreshold = serializedGuardSound.FindProperty("movingSpeedThreshold").floatValue
+        };
+    }
+
+    private static void ApplyPlayerSoundConfig(PlayerController playerController, PlayerSoundConfig config)
+    {
+        if (!config.IsValid || playerController == null)
+        {
+            return;
+        }
+
+        SerializedObject serializedPlayer = new SerializedObject(playerController);
+        serializedPlayer.FindProperty("walkFootstepClip").objectReferenceValue = config.WalkFootstepClip;
+        serializedPlayer.FindProperty("sprintFootstepClip").objectReferenceValue = config.SprintFootstepClip;
+        serializedPlayer.FindProperty("crouchFootstepClip").objectReferenceValue = config.CrouchFootstepClip;
+        serializedPlayer.FindProperty("walkFootstepInterval").floatValue = config.WalkFootstepInterval;
+        serializedPlayer.FindProperty("sprintFootstepInterval").floatValue = config.SprintFootstepInterval;
+        serializedPlayer.FindProperty("crouchFootstepInterval").floatValue = config.CrouchFootstepInterval;
+        serializedPlayer.FindProperty("walkFootstepVolume").floatValue = config.WalkFootstepVolume;
+        serializedPlayer.FindProperty("sprintFootstepVolume").floatValue = config.SprintFootstepVolume;
+        serializedPlayer.FindProperty("crouchFootstepVolume").floatValue = config.CrouchFootstepVolume;
+        serializedPlayer.FindProperty("walkNoiseRadius").floatValue = config.WalkNoiseRadius;
+        serializedPlayer.FindProperty("sprintNoiseRadius").floatValue = config.SprintNoiseRadius;
+        serializedPlayer.FindProperty("crouchNoiseRadius").floatValue = config.CrouchNoiseRadius;
+        serializedPlayer.FindProperty("moveInputThreshold").floatValue = config.MoveInputThreshold;
+        serializedPlayer.ApplyModifiedPropertiesWithoutUndo();
+    }
+
+    private static void ApplyGuardSoundConfig(GuardSoundSystem guardSoundSystem, GuardSoundConfig config)
+    {
+        if (!config.IsValid || guardSoundSystem == null)
+        {
+            return;
+        }
+
+        SerializedObject serializedGuardSound = new SerializedObject(guardSoundSystem);
+        serializedGuardSound.FindProperty("suspiciousEnterClip").objectReferenceValue = config.SuspiciousEnterClip;
+        serializedGuardSound.FindProperty("chaseEnterClip").objectReferenceValue = config.ChaseEnterClip;
+        serializedGuardSound.FindProperty("investigatingEnterClip").objectReferenceValue = config.InvestigatingEnterClip;
+        serializedGuardSound.FindProperty("returnToPatrolClip").objectReferenceValue = config.ReturnToPatrolClip;
+        serializedGuardSound.FindProperty("patrolFootstepsLoopClip").objectReferenceValue = config.PatrolFootstepsLoopClip;
+        serializedGuardSound.FindProperty("chasingFootstepsLoopClip").objectReferenceValue = config.ChasingFootstepsLoopClip;
+        serializedGuardSound.FindProperty("searchingLoopClip").objectReferenceValue = config.SearchingLoopClip;
+        serializedGuardSound.FindProperty("patrolLoopVolume").floatValue = config.PatrolLoopVolume;
+        serializedGuardSound.FindProperty("patrolLoopPitch").floatValue = config.PatrolLoopPitch;
+        serializedGuardSound.FindProperty("chaseLoopVolume").floatValue = config.ChaseLoopVolume;
+        serializedGuardSound.FindProperty("chaseLoopPitch").floatValue = config.ChaseLoopPitch;
+        serializedGuardSound.FindProperty("searchingLoopVolume").floatValue = config.SearchingLoopVolume;
+        serializedGuardSound.FindProperty("searchingLoopPitch").floatValue = config.SearchingLoopPitch;
+        serializedGuardSound.FindProperty("movingSpeedThreshold").floatValue = config.MovingSpeedThreshold;
+        serializedGuardSound.ApplyModifiedPropertiesWithoutUndo();
+    }
+
+    private static PlayerSoundConfig FillMissingPlayerClips(PlayerSoundConfig config)
+    {
+        if (!config.IsValid)
+        {
+            config = PlayerSoundConfig.Default;
+        }
+
+        if (config.WalkFootstepClip == null)
+        {
+            config.WalkFootstepClip = LoadAudioClipByName("walkFootstepClip");
+        }
+
+        if (config.SprintFootstepClip == null)
+        {
+            config.SprintFootstepClip = LoadAudioClipByName("sprintFootstepClip");
+        }
+
+        if (config.CrouchFootstepClip == null)
+        {
+            config.CrouchFootstepClip = LoadAudioClipByName("crouchFootstepClip");
+        }
+
+        return config;
+    }
+
+    private static GuardSoundConfig FillMissingGuardClips(GuardSoundConfig config)
+    {
+        if (!config.IsValid)
+        {
+            config = GuardSoundConfig.Default;
+        }
+
+        if (config.SuspiciousEnterClip == null)
+        {
+            config.SuspiciousEnterClip = LoadAudioClipByName("suspiciousEnterClip");
+        }
+
+        if (config.ChaseEnterClip == null)
+        {
+            config.ChaseEnterClip = LoadAudioClipByName("chaseEnterClip");
+        }
+
+        if (config.InvestigatingEnterClip == null)
+        {
+            config.InvestigatingEnterClip = LoadAudioClipByName("investigatingEnterClip");
+        }
+
+        if (config.ReturnToPatrolClip == null)
+        {
+            config.ReturnToPatrolClip = LoadAudioClipByName("returnToPatrolClip");
+        }
+
+        if (config.PatrolFootstepsLoopClip == null)
+        {
+            config.PatrolFootstepsLoopClip = LoadAudioClipByName("patrolFootstepsLoopClip");
+        }
+
+        if (config.ChasingFootstepsLoopClip == null)
+        {
+            config.ChasingFootstepsLoopClip = LoadAudioClipByName("chasingFootstepsLoopClip");
+        }
+
+        if (config.SearchingLoopClip == null)
+        {
+            config.SearchingLoopClip = LoadAudioClipByName("searchingLoopClip");
+        }
+
+        return config;
+    }
+
+    private static AudioClip LoadAudioClipByName(string clipName)
+    {
+        if (string.IsNullOrEmpty(clipName))
+        {
+            return null;
+        }
+
+        string[] clipGuids = AssetDatabase.FindAssets(clipName + " t:AudioClip", new[] { "Assets/Audio" });
+        if (clipGuids == null || clipGuids.Length == 0)
+        {
+            return null;
+        }
+
+        string clipPath = AssetDatabase.GUIDToAssetPath(clipGuids[0]);
+        return AssetDatabase.LoadAssetAtPath<AudioClip>(clipPath);
     }
 
     private static GameObject CreateCube(string name, Vector3 position, Vector3 scale, Transform parent, int layer)
@@ -481,10 +938,10 @@ public static class LevelBuilder
                 continue;
             }
 
-            Material material = renderer.material;
+            Material material = renderer.sharedMaterial;
             if (material == null)
             {
-                renderer.material = CreateStandardMaterial(FallbackColor, 0f, 0.08f, null);
+                renderer.sharedMaterial = CreateStandardMaterial(FallbackColor, 0f, 0.08f, null);
             }
         }
     }
@@ -496,7 +953,7 @@ public static class LevelBuilder
             return;
         }
 
-        renderer.material = CreateStandardMaterial(color, metallic, smoothness, emission);
+        renderer.sharedMaterial = CreateStandardMaterial(color, metallic, smoothness, emission);
     }
 
     private static Material CreateStandardMaterial(Color color, float metallic, float smoothness, Color? emission)
@@ -514,32 +971,6 @@ public static class LevelBuilder
         }
 
         return material;
-    }
-
-    private static Vector3 FindObstaclePosition(Vector3[] reservedPositions, float minDistance)
-    {
-        const int maxAttempts = 40;
-        for (int i = 0; i < maxAttempts; i++)
-        {
-            Vector3 candidate = new Vector3(Random.Range(-11f, 11f), 0f, Random.Range(-11f, 11f));
-            bool tooClose = false;
-
-            for (int j = 0; j < reservedPositions.Length; j++)
-            {
-                if (Vector3.Distance(candidate, reservedPositions[j]) < minDistance)
-                {
-                    tooClose = true;
-                    break;
-                }
-            }
-
-            if (!tooClose)
-            {
-                return candidate;
-            }
-        }
-
-        return new Vector3(Random.Range(-9f, 9f), 0f, Random.Range(-9f, 9f));
     }
 
     private static void RemoveLegacyRoofObjects()
@@ -663,6 +1094,115 @@ public static class LevelBuilder
         AssetDatabase.SaveAssets();
     }
 
+    private interface ILayoutElement
+    {
+        void Build(Transform parent, int environmentLayer);
+    }
+
+    private readonly struct RoomLayoutElement : ILayoutElement
+    {
+        private readonly RoomSpec roomSpec;
+
+        public RoomLayoutElement(RoomSpec roomSpec)
+        {
+            this.roomSpec = roomSpec;
+        }
+
+        public void Build(Transform parent, int environmentLayer)
+        {
+            CreateRoom(parent, roomSpec, environmentLayer);
+        }
+    }
+
+    private readonly struct CorridorLayoutElement : ILayoutElement
+    {
+        private readonly CorridorSpec corridorSpec;
+
+        public CorridorLayoutElement(CorridorSpec corridorSpec)
+        {
+            this.corridorSpec = corridorSpec;
+        }
+
+        public void Build(Transform parent, int environmentLayer)
+        {
+            CreateCorridor(parent, corridorSpec, environmentLayer);
+        }
+    }
+
+    private enum WallSide
+    {
+        North,
+        South,
+        East,
+        West
+    }
+
+    private readonly struct DoorwaySpec
+    {
+        public DoorwaySpec(WallSide side, float width, float offset)
+        {
+            Side = side;
+            Width = width;
+            Offset = offset;
+        }
+
+        public WallSide Side { get; }
+        public float Width { get; }
+        public float Offset { get; }
+    }
+
+    private readonly struct RoomSpec
+    {
+        public RoomSpec(string name, Vector3 center, Vector2 size, DoorwaySpec[] doorways)
+        {
+            Name = name;
+            Center = center;
+            Size = size;
+            Doorways = doorways;
+        }
+
+        public string Name { get; }
+        public Vector3 Center { get; }
+        public Vector2 Size { get; }
+        public DoorwaySpec[] Doorways { get; }
+    }
+
+    private readonly struct CorridorSpec
+    {
+        public CorridorSpec(string name, Vector3 center, float length, float width, bool isHorizontal)
+        {
+            Name = name;
+            Center = center;
+            Length = length;
+            Width = width;
+            IsHorizontal = isHorizontal;
+        }
+
+        public string Name { get; }
+        public Vector3 Center { get; }
+        public float Length { get; }
+        public float Width { get; }
+        public bool IsHorizontal { get; }
+    }
+
+    private struct PatrolZoneConfig
+    {
+        public string Name;
+        public Transform Root;
+        public float MinRadius;
+        public float MaxRadius;
+        public float MinStepDistance;
+    }
+
+    private struct LayoutResult
+    {
+        public Vector3 PlayerSpawn;
+        public Vector3 LobbyGuardSpawn;
+        public Vector3 SecurityGuardSpawn;
+        public PatrolZoneConfig LobbyPatrolZone;
+        public PatrolZoneConfig SecurityPatrolZone;
+    }
+
     private struct GuardBundle
     {
         public GameObject Root;
@@ -671,5 +1211,72 @@ public static class LevelBuilder
         public VisionSystem VisionSystem;
         public HearingSystem HearingSystem;
         public PatrolSystem PatrolSystem;
+        public GuardSoundSystem GuardSoundSystem;
+    }
+
+    private struct PlayerSoundConfig
+    {
+        public static readonly PlayerSoundConfig Invalid = new PlayerSoundConfig { IsValid = false };
+        public static readonly PlayerSoundConfig Default = new PlayerSoundConfig
+        {
+            IsValid = true,
+            WalkFootstepInterval = 0.5f,
+            SprintFootstepInterval = 0.3f,
+            CrouchFootstepInterval = 0.75f,
+            WalkFootstepVolume = 0.35f,
+            SprintFootstepVolume = 0.6f,
+            CrouchFootstepVolume = 0.2f,
+            WalkNoiseRadius = 4.5f,
+            SprintNoiseRadius = 8f,
+            CrouchNoiseRadius = 0f,
+            MoveInputThreshold = 0.01f
+        };
+
+        public bool IsValid;
+        public AudioClip WalkFootstepClip;
+        public AudioClip SprintFootstepClip;
+        public AudioClip CrouchFootstepClip;
+        public float WalkFootstepInterval;
+        public float SprintFootstepInterval;
+        public float CrouchFootstepInterval;
+        public float WalkFootstepVolume;
+        public float SprintFootstepVolume;
+        public float CrouchFootstepVolume;
+        public float WalkNoiseRadius;
+        public float SprintNoiseRadius;
+        public float CrouchNoiseRadius;
+        public float MoveInputThreshold;
+    }
+
+    private struct GuardSoundConfig
+    {
+        public static readonly GuardSoundConfig Invalid = new GuardSoundConfig { IsValid = false };
+        public static readonly GuardSoundConfig Default = new GuardSoundConfig
+        {
+            IsValid = true,
+            PatrolLoopVolume = 0.2f,
+            PatrolLoopPitch = 0.95f,
+            ChaseLoopVolume = 0.65f,
+            ChaseLoopPitch = 1.25f,
+            SearchingLoopVolume = 0.35f,
+            SearchingLoopPitch = 1f,
+            MovingSpeedThreshold = 0.05f
+        };
+
+        public bool IsValid;
+        public AudioClip SuspiciousEnterClip;
+        public AudioClip ChaseEnterClip;
+        public AudioClip InvestigatingEnterClip;
+        public AudioClip ReturnToPatrolClip;
+        public AudioClip PatrolFootstepsLoopClip;
+        public AudioClip ChasingFootstepsLoopClip;
+        public AudioClip SearchingLoopClip;
+        public float PatrolLoopVolume;
+        public float PatrolLoopPitch;
+        public float ChaseLoopVolume;
+        public float ChaseLoopPitch;
+        public float SearchingLoopVolume;
+        public float SearchingLoopPitch;
+        public float MovingSpeedThreshold;
     }
 }
