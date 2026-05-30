@@ -39,6 +39,9 @@ public class VisionSystem : MonoBehaviour
     private LayerMask playerMask;
 
     [SerializeField]
+    private float blockedSightSuspicionRatePerSecond = -12f;
+
+    [SerializeField]
     private Vector3 eyeOffset = new Vector3(0f, 1.6f, 0f);
 
     [SerializeField]
@@ -80,7 +83,7 @@ public class VisionSystem : MonoBehaviour
     /// <summary>
     /// Gets the mask used to occlude guard vision rays.
     /// </summary>
-    public LayerMask OcclusionMask => obstacleMask & ~playerMask;
+    public LayerMask OcclusionMask => BuildOcclusionMask();
 
     /// <summary>
     /// Gets the last known player position recorded by this vision system.
@@ -164,6 +167,12 @@ public class VisionSystem : MonoBehaviour
         }
     }
 
+    private void OnValidate()
+    {
+        blockedSightSuspicionRatePerSecond = Mathf.Min(0f, blockedSightSuspicionRatePerSecond);
+        proximityAwarenessRadius = Mathf.Max(0f, proximityAwarenessRadius);
+    }
+
     /// <summary>
     /// Returns whether suspicion has reached full detection threshold.
     /// </summary>
@@ -205,7 +214,7 @@ public class VisionSystem : MonoBehaviour
         bool inFovAndRange = inFov && inRange;
         bool inProximityRange = distanceToPlayer <= Mathf.Max(0f, proximityAwarenessRadius);
 
-        int obstacleOnlyMask = obstacleMask.value & ~playerMask.value;
+        int obstacleOnlyMask = BuildOcclusionMask();
         bool hasObstacleBetween = false;
         Vector3 rayEnd = playerCenter;
 
@@ -245,7 +254,7 @@ public class VisionSystem : MonoBehaviour
         }
         else if (inFovAndRange && hasObstacleBetween)
         {
-            suspicionRate = 5f;
+            suspicionRate = blockedSightSuspicionRatePerSecond;
         }
         else
         {
@@ -308,6 +317,17 @@ public class VisionSystem : MonoBehaviour
             playerTarget = collider.transform;
             return;
         }
+    }
+
+    private LayerMask BuildOcclusionMask()
+    {
+        // Keep occlusion broad so walls block vision even if obstacle layers
+        // were not explicitly configured on every scene object.
+        int mask = Physics.DefaultRaycastLayers | obstacleMask.value;
+
+        mask &= ~playerMask.value;
+        mask &= ~(1 << gameObject.layer);
+        return mask;
     }
 
     private void OnDrawGizmos()

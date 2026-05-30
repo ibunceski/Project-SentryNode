@@ -120,7 +120,6 @@ public class PlayerController : MonoBehaviour
         ApplyCrouch(isCrouching);
         HandleMovement();
         HandleFootsteps();
-        HandleInteractionNoise();
     }
 
     private void HandleCursorToggle()
@@ -246,10 +245,6 @@ public class PlayerController : MonoBehaviour
         }
 
         footstepTimer = interval;
-    }
-
-    private void HandleInteractionNoise()
-    {
     }
 
     private void ApplyCrouch(bool isCrouching)
