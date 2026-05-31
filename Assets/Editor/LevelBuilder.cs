@@ -551,9 +551,10 @@ public static class LevelBuilder
 
         GuardAI guardAI = guard.AddComponent<GuardAI>();
         GuardDoorInteractor guardDoorInteractor = guard.AddComponent<GuardDoorInteractor>();
+        PatrolSystem patrolSystem = guard.AddComponent<PatrolSystem>();
+        guard.AddComponent<GuardPatrolPinVisualizer>();
         VisionSystem visionSystem = guard.AddComponent<VisionSystem>();
         HearingSystem hearingSystem = guard.AddComponent<HearingSystem>();
-        PatrolSystem patrolSystem = guard.AddComponent<PatrolSystem>();
         GuardSoundSystem guardSoundSystem = guard.AddComponent<GuardSoundSystem>();
         guard.AddComponent<GuardDebugVisualizer>();
 

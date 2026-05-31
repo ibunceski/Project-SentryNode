@@ -59,6 +59,11 @@ public class PatrolSystem : MonoBehaviour
     }
 
     /// <summary>
+    /// Gets whether a patrol destination is currently active.
+    /// </summary>
+    public bool HasPatrolTarget => hasWanderTarget;
+
+    /// <summary>
     /// Ticks patrol logic for the provided agent.
     /// </summary>
     /// <param name="agent">The guard's existing NavMeshAgent.</param>
