@@ -161,7 +161,7 @@ public sealed class ChasePlayerActionNode : GuardActionNode
             Context.Navigation.StoppingDistance + Context.Navigation.Radius + Context.DestinationEpsilon);
         bool playerIsClose = Vector3.Distance(Context.Transform.position, playerPosition) <= closeProximityThreshold;
 
-        if (!hasLineOfSight && !playerIsClose)
+        if (!hasLineOfSight)
         {
             return NodeState.Failure;
         }

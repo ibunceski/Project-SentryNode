@@ -23,6 +23,7 @@ public static class LevelBuilder
     private static readonly Color GuardEyeColor = Rgb(220, 40, 40);
     private static readonly Color PlayerColor = Rgb(30, 180, 160);
     private static readonly Color PatrolPointColor = Rgb(255, 210, 0);
+    private static readonly Color DoorColor = Rgb(130, 86, 44);
     private static readonly Color AmbientColor = Rgb(60, 60, 75);
     private static readonly Color MainLightColor = Rgb(255, 245, 220);
     private static readonly Color FillLightColor = Rgb(180, 200, 255);
@@ -151,10 +152,10 @@ public static class LevelBuilder
             new RoomLayoutElement(security),
             new RoomLayoutElement(storage),
             new RoomLayoutElement(restricted),
-            new CorridorLayoutElement(new CorridorSpec("Corridor_LobbyToOperations", new Vector3(0f, 0f, -7f), 4f, 4f, false)),
-            new CorridorLayoutElement(new CorridorSpec("Corridor_OperationsToSecurity", new Vector3(8f, 0f, 0f), 4f, 3.6f, true)),
-            new CorridorLayoutElement(new CorridorSpec("Corridor_OperationsToStorage", new Vector3(-8f, 0f, 0f), 4f, 3.6f, true)),
-            new CorridorLayoutElement(new CorridorSpec("Corridor_OperationsToRestricted", new Vector3(0f, 0f, 7.25f), 4.5f, 3.6f, false))
+            new CorridorLayoutElement(new CorridorSpec("Corridor_LobbyToOperations", new Vector3(0f, 0f, -7f), 4f, 4.4f, false)),
+            new CorridorLayoutElement(new CorridorSpec("Corridor_OperationsToSecurity", new Vector3(8f, 0f, 0f), 4f, 4.2f, true)),
+            new CorridorLayoutElement(new CorridorSpec("Corridor_OperationsToStorage", new Vector3(-8f, 0f, 0f), 4f, 4.2f, true)),
+            new CorridorLayoutElement(new CorridorSpec("Corridor_OperationsToRestricted", new Vector3(0f, 0f, 7.25f), 4.5f, 4.2f, false))
         };
         for (int i = 0; i < layoutElements.Length; i++)
         {
@@ -168,24 +169,24 @@ public static class LevelBuilder
         CreateCoverObject("LobbyCover_CenterDesk", new Vector3(4.2f, 0.6f, -14.6f), new Vector3(1.8f, 1.2f, 1f), parent, environmentLayer);
 
         // Operations room corners and LOS blockers.
-        CreateCoverObject("OperationsCover_NW", new Vector3(-4.2f, 0.75f, 2.8f), new Vector3(1.6f, 1.5f, 1.6f), parent, environmentLayer);
-        CreateCoverObject("OperationsCover_NE", new Vector3(4.2f, 0.75f, 2.8f), new Vector3(1.6f, 1.5f, 1.6f), parent, environmentLayer);
-        CreateCoverObject("OperationsCover_SW", new Vector3(-3.8f, 0.75f, -2.4f), new Vector3(1.5f, 1.5f, 1.3f), parent, environmentLayer);
-        CreateCoverObject("OperationsCover_Mid", new Vector3(3.2f, 0.6f, -1.8f), new Vector3(1.8f, 1.2f, 1f), parent, environmentLayer);
-        CreateCoverObject("CorridorJunctionCover", new Vector3(-2.4f, 0.7f, 5.4f), new Vector3(1.2f, 1.4f, 1f), parent, environmentLayer);
+        CreateCoverObject("OperationsCover_NW", new Vector3(-4.6f, 0.75f, 3.1f), new Vector3(1.2f, 1.5f, 1.2f), parent, environmentLayer);
+        CreateCoverObject("OperationsCover_NE", new Vector3(4.6f, 0.75f, 3.1f), new Vector3(1.2f, 1.5f, 1.2f), parent, environmentLayer);
+        CreateCoverObject("OperationsCover_SW", new Vector3(-4.2f, 0.75f, -2.8f), new Vector3(1.2f, 1.5f, 1f), parent, environmentLayer);
+        CreateCoverObject("OperationsCover_Mid", new Vector3(2.8f, 0.6f, -2.3f), new Vector3(1.4f, 1.2f, 0.8f), parent, environmentLayer);
+        CreateCoverObject("CorridorJunctionCover", new Vector3(-3.1f, 0.65f, 5.9f), new Vector3(0.8f, 1.3f, 0.7f), parent, environmentLayer);
 
         // Security room props.
         CreateCoverObject("SecurityConsole", new Vector3(17.3f, 0.6f, 2.8f), new Vector3(1.8f, 1.2f, 0.8f), parent, environmentLayer);
         CreateCoverObject("SecurityLocker", new Vector3(18.6f, 1f, -2.8f), new Vector3(0.75f, 2f, 1.1f), parent, environmentLayer);
-        CreateCoverObject("SecurityDesk", new Vector3(13.1f, 0.6f, -0.6f), new Vector3(1.5f, 1.2f, 1f), parent, environmentLayer);
-        CreateCoverObject("SecurityPartition", new Vector3(17.6f, 0.8f, 0.8f), new Vector3(1f, 1.6f, 0.6f), parent, environmentLayer);
+        CreateCoverObject("SecurityDesk", new Vector3(12.7f, 0.55f, -1.2f), new Vector3(1.2f, 1.1f, 0.8f), parent, environmentLayer);
+        CreateCoverObject("SecurityPartition", new Vector3(18.1f, 0.75f, 1.1f), new Vector3(0.7f, 1.5f, 0.55f), parent, environmentLayer);
 
         // Storage room crates and shelves.
-        CreateCoverObject("StorageShelf_West", new Vector3(-18.5f, 1.1f, 0f), new Vector3(0.55f, 2.2f, 5.6f), parent, environmentLayer);
-        CreateCoverObject("StorageShelf_East", new Vector3(-11.5f, 1.1f, 0f), new Vector3(0.55f, 2.2f, 5.6f), parent, environmentLayer);
-        CreateCoverObject("StorageCrate_A", new Vector3(-17.1f, 0.6f, -3.1f), new Vector3(1f, 1.2f, 1f), parent, environmentLayer);
-        CreateCoverObject("StorageCrate_B", new Vector3(-16.9f, 0.55f, 1.6f), new Vector3(0.9f, 1.1f, 0.9f), parent, environmentLayer);
-        CreateCoverObject("StorageCrate_C", new Vector3(-12.9f, 0.55f, 2.8f), new Vector3(0.95f, 1.1f, 0.95f), parent, environmentLayer);
+        CreateCoverObject("StorageShelf_West", new Vector3(-17.9f, 1.1f, 0f), new Vector3(0.45f, 2.1f, 4.2f), parent, environmentLayer);
+        CreateCoverObject("StorageShelf_East", new Vector3(-12.1f, 1.1f, 0f), new Vector3(0.45f, 2.1f, 4.2f), parent, environmentLayer);
+        CreateCoverObject("StorageCrate_A", new Vector3(-17f, 0.5f, -2.6f), new Vector3(0.65f, 0.95f, 0.65f), parent, environmentLayer);
+        CreateCoverObject("StorageCrate_B", new Vector3(-16.2f, 0.5f, 1.05f), new Vector3(0.6f, 0.9f, 0.6f), parent, environmentLayer);
+        CreateCoverObject("StorageCrate_C", new Vector3(-13.9f, 0.5f, 2.1f), new Vector3(0.65f, 0.95f, 0.65f), parent, environmentLayer);
 
         // Restricted room barriers.
         CreateCoverObject("RestrictedBarrier_Left", new Vector3(-3f, 0.9f, 14.3f), new Vector3(2f, 1.8f, 1.2f), parent, environmentLayer);
@@ -214,7 +215,7 @@ public static class LevelBuilder
 
         return new LayoutResult
         {
-            PlayerSpawn = new Vector3(0f, 0f, -17.2f),
+            PlayerSpawn = new Vector3(-14.5f, 0f, -0.5f),
             LobbyGuardSpawn = new Vector3(-3.2f, 0f, -12.8f),
             SecurityGuardSpawn = new Vector3(16f, 0f, 0.8f),
             LobbyPatrolZone = lobbyPatrolZone,
@@ -357,6 +358,58 @@ public static class LevelBuilder
 
         CreateWall(wallName + "_A", centeredWall - segmentOffset, wallSize, parent, environmentLayer);
         CreateWall(wallName + "_B", centeredWall + segmentOffset, wallSize, parent, environmentLayer);
+        CreateDoor(
+            parent,
+            wallName + "_Door",
+            centeredWall,
+            gapOffset * 2f,
+            wallHeight,
+            wallThickness,
+            horizontal,
+            environmentLayer);
+    }
+
+    private static void CreateDoor(
+        Transform parent,
+        string doorName,
+        Vector3 doorwayCenter,
+        float openingWidth,
+        float wallHeight,
+        float wallThickness,
+        bool horizontal,
+        int environmentLayer)
+    {
+        float doorWidth = Mathf.Max(0.2f, openingWidth - 0.08f);
+        float doorHeight = Mathf.Max(1.8f, wallHeight - 0.25f);
+        float doorThickness = Mathf.Max(0.08f, wallThickness * 0.35f);
+        Vector3 slideAxis = horizontal ? Vector3.right : Vector3.forward;
+
+        Vector3 doorPosition = doorwayCenter;
+        doorPosition.y = doorwayCenter.y - (wallHeight * 0.5f) + (doorHeight * 0.5f);
+
+        GameObject doorRoot = new GameObject(doorName);
+        doorRoot.transform.SetParent(parent);
+        doorRoot.transform.position = doorPosition;
+        doorRoot.transform.rotation = Quaternion.identity;
+        SetLayerRecursively(doorRoot, environmentLayer);
+        Door door = doorRoot.AddComponent<Door>();
+
+        SerializedObject serializedDoor = new SerializedObject(door);
+        serializedDoor.FindProperty("slideDirection").vector3Value = slideAxis;
+        serializedDoor.FindProperty("slideDistance").floatValue = doorWidth;
+        serializedDoor.FindProperty("openSpeed").floatValue = 8f;
+        serializedDoor.FindProperty("defaultAutoCloseDelay").floatValue = 1.35f;
+        serializedDoor.ApplyModifiedPropertiesWithoutUndo();
+
+        GameObject doorPanel = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        doorPanel.name = doorName + "_Panel";
+        doorPanel.transform.SetParent(doorRoot.transform, false);
+        doorPanel.transform.localPosition = Vector3.zero;
+        doorPanel.transform.localRotation = Quaternion.identity;
+        doorPanel.transform.localScale = horizontal
+            ? new Vector3(doorWidth, doorHeight, doorThickness)
+            : new Vector3(doorThickness, doorHeight, doorWidth);
+        SetLayerRecursively(doorPanel, environmentLayer);
     }
 
     private static GameObject CreateWall(string name, Vector3 center, Vector3 size, Transform parent, int environmentLayer)
@@ -489,7 +542,7 @@ public static class LevelBuilder
 
         NavMeshAgent agent = guard.AddComponent<NavMeshAgent>();
         agent.speed = 3.5f;
-        agent.radius = 0.35f;
+        agent.radius = 0.3f;
         agent.height = 1.9f;
         agent.baseOffset = 0f;
         agent.stoppingDistance = 0.3f;
@@ -497,11 +550,19 @@ public static class LevelBuilder
         agent.autoBraking = false;
 
         GuardAI guardAI = guard.AddComponent<GuardAI>();
+        GuardDoorInteractor guardDoorInteractor = guard.AddComponent<GuardDoorInteractor>();
+        PatrolSystem patrolSystem = guard.AddComponent<PatrolSystem>();
+        guard.AddComponent<GuardPatrolPinVisualizer>();
         VisionSystem visionSystem = guard.AddComponent<VisionSystem>();
         HearingSystem hearingSystem = guard.AddComponent<HearingSystem>();
-        PatrolSystem patrolSystem = guard.AddComponent<PatrolSystem>();
         GuardSoundSystem guardSoundSystem = guard.AddComponent<GuardSoundSystem>();
         guard.AddComponent<GuardDebugVisualizer>();
+
+        SerializedObject serializedDoorInteractor = new SerializedObject(guardDoorInteractor);
+        serializedDoorInteractor.FindProperty("detectionMask").intValue = 1 << environmentLayer;
+        serializedDoorInteractor.FindProperty("detectionDistance").floatValue = 1.75f;
+        serializedDoorInteractor.FindProperty("closeDelayAfterPass").floatValue = 1.2f;
+        serializedDoorInteractor.ApplyModifiedPropertiesWithoutUndo();
 
         return new GuardBundle
         {
@@ -529,6 +590,7 @@ public static class LevelBuilder
         characterController.radius = 0.3f;
 
         player.AddComponent<PlayerController>();
+        PlayerInteraction playerInteraction = player.AddComponent<PlayerInteraction>();
 
         GameObject playerVisual = GameObject.CreatePrimitive(PrimitiveType.Capsule);
         playerVisual.name = "PlayerVisual";
@@ -548,6 +610,10 @@ public static class LevelBuilder
         camera.tag = "MainCamera";
         cameraObject.AddComponent<AudioListener>();
         SetLayerRecursively(cameraObject, playerLayer);
+
+        SerializedObject interactionSerialized = new SerializedObject(playerInteraction);
+        interactionSerialized.FindProperty("cameraTransform").objectReferenceValue = cameraObject.transform;
+        interactionSerialized.ApplyModifiedPropertiesWithoutUndo();
 
         return player;
     }
@@ -604,12 +670,15 @@ public static class LevelBuilder
         SerializedProperty constrainToCenterProperty = patrolSerialized.FindProperty("constrainToPatrolCenter");
         if (constrainToCenterProperty != null)
         {
-            constrainToCenterProperty.boolValue = patrolZoneConfig.Root != null;
+            // Let guards roam across connected rooms/corridors instead of staying anchored to one room.
+            constrainToCenterProperty.boolValue = false;
         }
 
-        patrolSerialized.FindProperty("minWanderRadius").floatValue = patrolZoneConfig.MinRadius;
-        patrolSerialized.FindProperty("maxWanderRadius").floatValue = patrolZoneConfig.MaxRadius;
-        patrolSerialized.FindProperty("minStepDistance").floatValue = Mathf.Min(patrolZoneConfig.MinStepDistance, patrolZoneConfig.MaxRadius * 0.75f);
+        float roamMinRadius = Mathf.Max(4f, patrolZoneConfig.MinRadius);
+        float roamMaxRadius = Mathf.Max(12f, patrolZoneConfig.MaxRadius * 2.25f);
+        patrolSerialized.FindProperty("minWanderRadius").floatValue = roamMinRadius;
+        patrolSerialized.FindProperty("maxWanderRadius").floatValue = roamMaxRadius;
+        patrolSerialized.FindProperty("minStepDistance").floatValue = Mathf.Min(Mathf.Max(2.5f, patrolZoneConfig.MinStepDistance), roamMaxRadius * 0.7f);
         patrolSerialized.FindProperty("waypointTolerance").floatValue = 0.45f;
         patrolSerialized.FindProperty("minWaitDuration").floatValue = 0.1f;
         patrolSerialized.FindProperty("maxWaitDuration").floatValue = 0.35f;
@@ -878,6 +947,12 @@ public static class LevelBuilder
             if (rendererName == "Floor")
             {
                 SetMaterial(renderer, FloorColor, 0f, 0.1f);
+                continue;
+            }
+
+            if (lowerName.Contains("_door_"))
+            {
+                SetMaterial(renderer, DoorColor, 0.05f, 0.3f);
                 continue;
             }
 
