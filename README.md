@@ -1,4 +1,4 @@
-# Stealth Guard AI Prototype
+## SentryNode: Stealth Game - AI for Games course project
 
 This repository contains a Unity stealth-game prototype focused on modular guard AI. The project demonstrates a first-person player moving through an indoor level while AI guards patrol, notice the player through vision, react to sound, chase when fully alerted, investigate last-known positions, search locally, and eventually return to patrol.
 
